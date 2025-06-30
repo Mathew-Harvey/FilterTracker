@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filter Status Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Industrial Filter Status Tracker</h1>
+            <div class="header-controls">
+                <button id="emailBtn" class="email-btn">
+                    <span class="email-icon">📧</span>
+                    <span class="email-text">Send Email</span>
+                </button>
+                <button id="lockBtn" class="lock-btn locked">
+                    <span class="lock-icon">🔒</span>
+                    <span class="lock-text">Locked</span>
+                </button>
+            </div>
+        </header>
+
+        <div id="filters" class="filters-grid">
+            <!-- Filters will be dynamically loaded here -->
+        </div>
+    </div>
+
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle">Filter Details</h2>
+            <div id="modalBody">
+                <!-- Modal content will be dynamically loaded -->
+            </div>
+        </div>
+    </div>
+
+    <div id="emailModal" class="modal">
+        <div class="modal-content email-modal-content">
+            <span class="close email-close">&times;</span>
+            <h2>Weekly Filter Status Report</h2>
+            <div class="email-content">
+                <div class="email-header">
+                    <p>Copy the email content below and paste it into your email client:</p>
+                </div>
+                <div class="email-body">
+                    <textarea id="emailText" readonly></textarea>
+                </div>
+                <div class="email-actions">
+                    <button id="copyEmailBtn" class="btn-primary">Copy to Clipboard</button>
+                    <button id="closeEmailBtn" class="btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
