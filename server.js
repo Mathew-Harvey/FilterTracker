@@ -1,3 +1,7 @@
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
+
 require('dotenv').config();
 console.log('Environment variables loaded. MONGODB_URI defined:', !!process.env.MONGODB_URI);
 const express = require('express');
@@ -6,7 +10,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // MongoDB connection
 const uri = process.env.MONGODB_URI;
