@@ -1,3 +1,5 @@
+require('dotenv').config();
+console.log('Environment variables loaded. MONGODB_URI defined:', !!process.env.MONGODB_URI);
 const express = require('express');
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const cors = require('cors');
@@ -7,11 +9,18 @@ const app = express();
 const PORT = 3000;
 
 // MongoDB connection
-const uri = "mongodb+srv://mathewharvey:Bongos4u@lifeinweekscluster.atuq9hl.mongodb.net/?retryWrites=true&w=majority&appName=LifeInWeeksCluster";
+const uri = process.env.MONGODB_URI;
+
+if (!uri) {
+  console.error('MONGODB_URI environment variable is not set');
+  console.error('Please check that your .env file exists and contains MONGODB_URI=your_connection_string');
+  process.exit(1);
+}
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
+    
     deprecationErrors: true,
   }
 });
