@@ -2,6 +2,10 @@ let filters = [];
 let isUnlocked = false;
 let inactivityTimer;
 let selectedFilter = null;
+let accessories = [];
+let selectedAccessories = [];
+let currentEditingAccessory = null;
+let currentPool = 'NSW';
 
 // Booking state management
 let isDragging = false;
@@ -30,6 +34,74 @@ async function updateFilter(filterId, updates) {
         await fetchFilters();
     } catch (error) {
         console.error('Error updating filter:', error);
+    }
+}
+
+// Accessory API calls
+async function fetchAccessories() {
+    try {
+        const response = await fetch('/api/accessories');
+        accessories = await response.json();
+        renderAccessoryList();
+    } catch (error) {
+        console.error('Error fetching accessories:', error);
+    }
+}
+
+async function createAccessory(accessoryData) {
+    try {
+        const response = await fetch('/api/accessories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(accessoryData)
+        });
+        const result = await response.json();
+        if (result.success) {
+            await fetchAccessories();
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error creating accessory:', error);
+        return false;
+    }
+}
+
+async function updateAccessory(accessoryId, updates) {
+    try {
+        await fetch(`/api/accessories/${accessoryId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        await fetchAccessories();
+    } catch (error) {
+        console.error('Error updating accessory:', error);
+    }
+}
+
+async function deleteAccessory(accessoryId) {
+    try {
+        await fetch(`/api/accessories/${accessoryId}`, {
+            method: 'DELETE'
+        });
+        await fetchAccessories();
+    } catch (error) {
+        console.error('Error deleting accessory:', error);
+    }
+}
+
+async function fetchAvailableAccessories(filterId, startDate, endDate) {
+    try {
+        const response = await fetch('/api/accessories/available', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filterId, startDate, endDate })
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching available accessories:', error);
+        return [];
     }
 }
 
@@ -111,6 +183,264 @@ function formatNotesWithLinks(notes) {
     return notes.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
+// Accessory Management Functions
+function openAccessoryModal() {
+    const accessoryModal = document.getElementById('accessoryModal');
+    fetchAccessories();
+    accessoryModal.style.display = 'block';
+}
+
+function closeAccessoryModal() {
+    document.getElementById('accessoryModal').style.display = 'none';
+}
+
+function switchPool(pool) {
+    currentPool = pool;
+    
+    // Update button states
+    document.getElementById('nswPoolBtn').classList.toggle('active', pool === 'NSW');
+    document.getElementById('waPoolBtn').classList.toggle('active', pool === 'WA');
+    
+    renderAccessoryList();
+}
+
+function renderAccessoryList() {
+    const container = document.getElementById('accessoryList');
+    const poolAccessories = accessories.filter(acc => acc.pool === currentPool);
+    
+    if (poolAccessories.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                <p>No accessories in the ${currentPool} pool yet.</p>
+                <p>Click "Add New Accessory" to get started.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = poolAccessories.map(accessory => {
+        const quantityClass = accessory.quantity <= 1 ? 'limited' : 
+                              accessory.quantity === 0 ? 'unavailable' : '';
+        
+        return `
+            <div class="accessory-item">
+                <div class="accessory-item-header">
+                    <div>
+                        <div class="accessory-name">${accessory.name}</div>
+                        <div class="accessory-pool">${accessory.pool}</div>
+                    </div>
+                </div>
+                <div class="accessory-quantity ${quantityClass}">
+                    ${accessory.quantity} ${accessory.unit || 'units'}
+                </div>
+                <div class="accessory-details">
+                    <div class="accessory-detail">
+                        <span>Total Available:</span>
+                        <span>${accessory.quantity}</span>
+                    </div>
+                    <div class="accessory-detail">
+                        <span>Currently Allocated:</span>
+                        <span>0</span>
+                    </div>
+                </div>
+                <div class="accessory-notes ${!accessory.notes ? 'empty' : ''}">
+                    ${accessory.notes || 'No notes'}
+                </div>
+                <div class="accessory-actions">
+                    <button class="btn-edit" onclick="editAccessory(${accessory.id})">Edit</button>
+                    <button class="btn-delete" onclick="confirmDeleteAccessory(${accessory.id})">Delete</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function openAccessoryForm(accessory = null) {
+    currentEditingAccessory = accessory;
+    const modal = document.getElementById('accessoryFormModal');
+    const title = document.getElementById('accessoryFormTitle');
+    
+    if (accessory) {
+        title.textContent = 'Edit Accessory';
+        document.getElementById('accessoryName').value = accessory.name;
+        document.getElementById('accessoryPool').value = accessory.pool;
+        document.getElementById('accessoryQuantity').value = accessory.quantity;
+        document.getElementById('accessoryUnit').value = accessory.unit || '';
+        document.getElementById('accessoryNotes').value = accessory.notes || '';
+    } else {
+        title.textContent = 'Add New Accessory';
+        document.getElementById('accessoryName').value = '';
+        document.getElementById('accessoryPool').value = currentPool;
+        document.getElementById('accessoryQuantity').value = 1;
+        document.getElementById('accessoryUnit').value = '';
+        document.getElementById('accessoryNotes').value = '';
+    }
+    
+    modal.style.display = 'block';
+}
+
+function closeAccessoryForm() {
+    document.getElementById('accessoryFormModal').style.display = 'none';
+    currentEditingAccessory = null;
+}
+
+function editAccessory(accessoryId) {
+    const accessory = accessories.find(acc => acc.id === accessoryId);
+    if (accessory) {
+        openAccessoryForm(accessory);
+    }
+}
+
+function confirmDeleteAccessory(accessoryId) {
+    const accessory = accessories.find(acc => acc.id === accessoryId);
+    if (accessory && confirm(`Are you sure you want to delete "${accessory.name}"?`)) {
+        deleteAccessory(accessoryId);
+    }
+}
+
+async function saveAccessory() {
+    const name = document.getElementById('accessoryName').value.trim();
+    const pool = document.getElementById('accessoryPool').value;
+    const quantity = parseInt(document.getElementById('accessoryQuantity').value);
+    const unit = document.getElementById('accessoryUnit').value.trim();
+    const notes = document.getElementById('accessoryNotes').value.trim();
+    
+    if (!name) {
+        alert('Please enter an accessory name');
+        return;
+    }
+    
+    if (quantity < 0) {
+        alert('Quantity must be 0 or greater');
+        return;
+    }
+    
+    const accessoryData = { name, pool, quantity, unit, notes };
+    
+    let success = false;
+    if (currentEditingAccessory) {
+        await updateAccessory(currentEditingAccessory.id, accessoryData);
+        success = true;
+    } else {
+        success = await createAccessory(accessoryData);
+    }
+    
+    if (success) {
+        closeAccessoryForm();
+        // Update current pool to show the updated/new accessory
+        if (pool !== currentPool) {
+            switchPool(pool);
+        }
+    } else {
+        alert('Error saving accessory. Please try again.');
+    }
+}
+
+// Accessory Selection for Bookings
+async function renderAccessorySelection() {
+    if (!selectedFilter || currentBookingDates.length === 0) return;
+    
+    const sortedDates = currentBookingDates.sort();
+    const startDate = sortedDates[0];
+    const endDate = sortedDates[sortedDates.length - 1];
+    
+    const availableAccessories = await fetchAvailableAccessories(selectedFilter.id, startDate, endDate);
+    
+    const container = document.getElementById('accessorySelectionContainer');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <h4>Available Accessories for Selected Dates</h4>
+        <div class="available-accessories">
+            ${availableAccessories.map(accessory => `
+                <div class="available-accessory" data-accessory-id="${accessory.id}">
+                    <div class="accessory-info">
+                        <div class="accessory-info-name">${accessory.name}</div>
+                        <div class="accessory-info-available">
+                            Available: ${accessory.availableQuantity}/${accessory.quantity} ${accessory.unit || ''}
+                        </div>
+                    </div>
+                    <div class="accessory-input">
+                        <input type="number" 
+                               min="0" 
+                               max="${accessory.availableQuantity}" 
+                               value="0" 
+                               id="qty-${accessory.id}"
+                               onchange="updateAccessorySelection(${accessory.id})">
+                        <button onclick="quickSelectAccessory(${accessory.id}, ${Math.min(1, accessory.availableQuantity)})">
+                            Add
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+        <div class="selected-accessories" id="selectedAccessoriesDisplay"></div>
+    `;
+    
+    updateSelectedAccessoriesDisplay();
+}
+
+function updateAccessorySelection(accessoryId) {
+    const input = document.getElementById(`qty-${accessoryId}`);
+    const quantity = parseInt(input.value) || 0;
+    
+    // Remove existing selection for this accessory
+    selectedAccessories = selectedAccessories.filter(sel => sel.id !== accessoryId);
+    
+    // Add new selection if quantity > 0
+    if (quantity > 0) {
+        const accessory = accessories.find(acc => acc.id === accessoryId);
+        if (accessory) {
+            selectedAccessories.push({
+                id: accessoryId,
+                name: accessory.name,
+                quantity: quantity,
+                unit: accessory.unit || ''
+            });
+        }
+    }
+    
+    updateSelectedAccessoriesDisplay();
+}
+
+function quickSelectAccessory(accessoryId, quantity) {
+    const input = document.getElementById(`qty-${accessoryId}`);
+    input.value = quantity;
+    updateAccessorySelection(accessoryId);
+}
+
+function updateSelectedAccessoriesDisplay() {
+    const container = document.getElementById('selectedAccessoriesDisplay');
+    if (!container) return;
+    
+    if (selectedAccessories.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    container.innerHTML = `
+        <h5>Selected Accessories:</h5>
+        ${selectedAccessories.map(accessory => `
+            <div class="selected-accessory-item">
+                <span>${accessory.name} - ${accessory.quantity} ${accessory.unit}</span>
+                <button class="selected-accessory-remove" onclick="removeSelectedAccessory(${accessory.id})">
+                    Remove
+                </button>
+            </div>
+        `).join('')}
+    `;
+}
+
+function removeSelectedAccessory(accessoryId) {
+    selectedAccessories = selectedAccessories.filter(sel => sel.id !== accessoryId);
+    
+    // Reset the input field
+    const input = document.getElementById(`qty-${accessoryId}`);
+    if (input) input.value = 0;
+    
+    updateSelectedAccessoriesDisplay();
+}
+
 // Modal functions
 function openFilterModal(filterId) {
     selectedFilter = filters.find(f => f.id === filterId);
@@ -175,9 +505,13 @@ function openFilterModal(filterId) {
         
         <div class="form-group">
             <label>Schedule Bookings (Next 4 Weeks)</label>
-            ${isUnlocked ? '<p class="booking-instructions">Click and drag to select date ranges, then enter job location below</p>' : ''}
+            ${isUnlocked ? '<p class="booking-instructions">Click and drag to select date ranges, then enter job location and select accessories below</p>' : ''}
             <div id="calendar" class="calendar"></div>
         </div>
+        
+        ${isUnlocked ? `
+            <div id="accessorySelectionContainer" class="accessory-selection"></div>
+        ` : ''}
         
         ${isUnlocked ? `
             <div id="bookingControls" class="booking-controls">
@@ -333,6 +667,10 @@ function updateSelectedDatesInfo() {
     
     if (currentBookingDates.length === 0) {
         infoDiv.style.display = 'none';
+        // Clear accessory selection
+        selectedAccessories = [];
+        const accessoryContainer = document.getElementById('accessorySelectionContainer');
+        if (accessoryContainer) accessoryContainer.innerHTML = '';
         return;
     }
     
@@ -345,6 +683,11 @@ function updateSelectedDatesInfo() {
         const startDate = new Date(sortedDates[0]).toLocaleDateString();
         const endDate = new Date(sortedDates[sortedDates.length - 1]).toLocaleDateString();
         textSpan.textContent = `Selected: ${startDate} - ${endDate} (${currentBookingDates.length} days)`;
+    }
+    
+    // Render accessory selection for the selected dates
+    if (isUnlocked) {
+        renderAccessorySelection();
     }
 }
 
@@ -365,7 +708,8 @@ function addBooking() {
     pendingBookings.push({
         dates: [...currentBookingDates],
         location: jobLocation,
-        type: 'booking'
+        type: 'booking',
+        accessories: [...selectedAccessories]
     });
     
     // Clear current selection
@@ -388,7 +732,8 @@ function addServiceBooking() {
     pendingBookings.push({
         dates: [...currentBookingDates],
         location: jobLocation,
-        type: 'service'
+        type: 'service',
+        accessories: [...selectedAccessories]
     });
     
     // Clear current selection
@@ -417,6 +762,7 @@ function scheduleService() {
 
 function clearSelection() {
     currentBookingDates = [];
+    selectedAccessories = [];
     document.getElementById('jobLocation').value = '';
     updateDateSelection();
     updateSelectedDatesInfo();
@@ -441,10 +787,13 @@ function renderPendingBookings() {
                 
                 const isService = booking.type === 'service';
                 
+                const accessoryCount = booking.accessories ? booking.accessories.length : 0;
+                const accessoryText = accessoryCount > 0 ? ` (${accessoryCount} accessories)` : '';
+                
                 return `
                     <div class="pending-item ${isService ? 'service-booking' : ''}">
                         <span class="pending-dates">${dateRange}</span>
-                        <span class="pending-location">${booking.location} ${isService ? '🔧' : ''}</span>
+                        <span class="pending-location">${booking.location} ${isService ? '🔧' : ''}${accessoryText}</span>
                         <button class="remove-pending" onclick="removePendingBooking(${index})">Remove</button>
                     </div>
                 `;
@@ -464,9 +813,12 @@ function renderBookings(bookings) {
     
     return bookings.map(booking => {
         const isService = booking.type === 'service';
+        const accessoryCount = booking.accessories ? booking.accessories.length : 0;
+        const accessoryText = accessoryCount > 0 ? ` (${accessoryCount} accessories)` : '';
+        
         return `
             <div class="booking-item ${isService ? 'service-booking' : ''}">
-                <span>${new Date(booking.date).toLocaleDateString()} - ${booking.location} ${isService ? '🔧' : ''}</span>
+                <span>${new Date(booking.date).toLocaleDateString()} - ${booking.location} ${isService ? '🔧' : ''}${accessoryText}</span>
                 ${isUnlocked ? `<button class="remove-booking" onclick="removeBooking('${booking.date}')">Remove</button>` : ''}
             </div>
         `;
@@ -499,7 +851,8 @@ function saveAllChanges() {
             const bookingData = { 
                 date, 
                 location: booking.location,
-                type: booking.type || 'booking'
+                type: booking.type || 'booking',
+                accessories: booking.accessories || []
             };
             
             // If this is a service booking, update the last service date
@@ -564,6 +917,17 @@ document.getElementById('emailBtn').addEventListener('click', openEmailModal);
 document.querySelector('.email-close').addEventListener('click', closeEmailModal);
 document.getElementById('closeEmailBtn').addEventListener('click', closeEmailModal);
 document.getElementById('copyEmailBtn').addEventListener('click', copyEmailToClipboard);
+
+// Accessory functionality
+document.getElementById('accessoryBtn').addEventListener('click', openAccessoryModal);
+document.querySelector('.accessory-close').addEventListener('click', closeAccessoryModal);
+document.getElementById('closeAccessoryBtn').addEventListener('click', closeAccessoryModal);
+document.getElementById('nswPoolBtn').addEventListener('click', () => switchPool('NSW'));
+document.getElementById('waPoolBtn').addEventListener('click', () => switchPool('WA'));
+document.getElementById('addAccessoryBtn').addEventListener('click', () => openAccessoryForm());
+document.querySelector('.accessory-form-close').addEventListener('click', closeAccessoryForm);
+document.getElementById('saveAccessoryBtn').addEventListener('click', saveAccessory);
+document.getElementById('cancelAccessoryBtn').addEventListener('click', closeAccessoryForm);
 
 function openEmailModal() {
     const emailModal = document.getElementById('emailModal');
@@ -631,9 +995,27 @@ function generateWeeklyReport() {
                 const bookingDate = new Date(booking.date).toLocaleDateString();
                 const isService = booking.type === 'service';
                 emailBody += `   • ${bookingDate}: ${booking.location}${isService ? ' (Service)' : ''}\n`;
+                
+                // Add accessory information for this booking
+                if (booking.accessories && booking.accessories.length > 0) {
+                    emailBody += `     📦 Accessories: `;
+                    const accessoryList = booking.accessories.map(acc => 
+                        `${acc.name} (${acc.quantity} ${acc.unit})`
+                    ).join(', ');
+                    emailBody += `${accessoryList}\n`;
+                }
             });
         } else {
             emailBody += `📅 Bookings for Next 7 Days: None scheduled ✅\n`;
+        }
+        
+        // Overall accessory allocation for this filter during the week
+        const weeklyAccessoryAllocations = getWeeklyAccessoryAllocations(filter, today, weekFromToday);
+        if (weeklyAccessoryAllocations.length > 0) {
+            emailBody += `🔧 Weekly Accessory Allocations:\n`;
+            weeklyAccessoryAllocations.forEach(allocation => {
+                emailBody += `   • ${allocation.name}: ${allocation.totalQuantity} ${allocation.unit} (${allocation.days} days)\n`;
+            });
         }
         
         // Notes
@@ -679,8 +1061,67 @@ function generateWeeklyReport() {
         });
     }
     
+    // Accessory Summary
+    const accessorySummary = generateAccessorySummary(today, weekFromToday);
+    
+    emailBody += `\n${'='.repeat(60)}\n`;
+    emailBody += `ACCESSORY STATUS SUMMARY\n`;
+    emailBody += `${'-'.repeat(30)}\n`;
+    
+    // High utilization accessories (>50% allocated)
+    const highUtilization = accessorySummary.availability.filter(acc => acc.percentUsed >= 50);
+    if (highUtilization.length > 0) {
+        emailBody += `⚠️ HIGH UTILIZATION ACCESSORIES (50%+ allocated):\n`;
+        highUtilization.forEach(acc => {
+            const status = acc.available <= 0 ? '🔴 FULLY ALLOCATED' : 
+                          acc.available <= 1 ? '🟡 LIMITED' : '🟢 AVAILABLE';
+            emailBody += `   • ${acc.name} (${acc.pool}): ${acc.allocated}/${acc.total} ${acc.unit} used (${acc.percentUsed}%) ${status}\n`;
+        });
+        emailBody += `\n`;
+    }
+    
+    // Pool status
+    const nswPoolItems = accessorySummary.availability.filter(acc => acc.pool === 'NSW');
+    const waPoolItems = accessorySummary.availability.filter(acc => acc.pool === 'WA');
+    
+    const nswAllocated = nswPoolItems.filter(acc => acc.allocated > 0).length;
+    const waAllocated = waPoolItems.filter(acc => acc.allocated > 0).length;
+    
+    emailBody += `📦 POOL STATUS:\n`;
+    emailBody += `   🏢 NSW Pool (Filter 4): ${nswAllocated}/${nswPoolItems.length} accessories in use\n`;
+    emailBody += `   🏢 WA Pool (Filters 1,2,3): ${waAllocated}/${waPoolItems.length} accessories in use\n`;
+    
+    // Most used accessories this week
+    if (accessorySummary.usage.length > 0) {
+        const topUsed = accessorySummary.usage
+            .sort((a, b) => b.totalAllocated - a.totalAllocated)
+            .slice(0, 5);
+        
+        emailBody += `\n📈 MOST ALLOCATED ACCESSORIES THIS WEEK:\n`;
+        topUsed.forEach((usage, index) => {
+            const filtersArray = Array.from(usage.filtersUsing);
+            emailBody += `   ${index + 1}. ${usage.name}: ${usage.totalAllocated} ${usage.unit} (${filtersArray.join(', ')})\n`;
+        });
+    }
+    
+    // Fully available accessories
+    const fullyAvailable = accessorySummary.availability.filter(acc => acc.allocated === 0);
+    if (fullyAvailable.length > 0) {
+        emailBody += `\n✅ FULLY AVAILABLE ACCESSORIES (${fullyAvailable.length} items):\n`;
+        const nswAvailable = fullyAvailable.filter(acc => acc.pool === 'NSW');
+        const waAvailable = fullyAvailable.filter(acc => acc.pool === 'WA');
+        
+        if (nswAvailable.length > 0) {
+            emailBody += `   NSW Pool: ${nswAvailable.map(acc => acc.name).join(', ')}\n`;
+        }
+        if (waAvailable.length > 0) {
+            emailBody += `   WA Pool: ${waAvailable.map(acc => acc.name).join(', ')}\n`;
+        }
+    }
+    
     emailBody += `\n${'='.repeat(60)}\n`;
     emailBody += `This report was automatically generated by the Filter Status Tracker system.\n`;
+    emailBody += `Includes comprehensive filter booking and accessory allocation tracking.\n`;
     emailBody += `For updates or changes, please access the system directly.\n`;
     
     return emailBody;
@@ -693,6 +1134,80 @@ function getNextWeekBookings(filter, startDate, endDate) {
         const bookingDate = new Date(booking.date);
         return bookingDate >= startDate && bookingDate <= endDate;
     }).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function getWeeklyAccessoryAllocations(filter, startDate, endDate) {
+    const nextWeekBookings = getNextWeekBookings(filter, startDate, endDate);
+    const accessoryMap = new Map();
+    
+    nextWeekBookings.forEach(booking => {
+        if (booking.accessories && booking.accessories.length > 0) {
+            booking.accessories.forEach(accessory => {
+                const key = accessory.id || accessory.name;
+                if (accessoryMap.has(key)) {
+                    const existing = accessoryMap.get(key);
+                    existing.totalQuantity += accessory.quantity;
+                    existing.days += 1;
+                } else {
+                    accessoryMap.set(key, {
+                        name: accessory.name,
+                        totalQuantity: accessory.quantity,
+                        unit: accessory.unit || '',
+                        days: 1
+                    });
+                }
+            });
+        }
+    });
+    
+    return Array.from(accessoryMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function generateAccessorySummary(startDate, endDate) {
+    // Calculate overall accessory usage across all filters
+    const accessoryUsage = new Map();
+    const accessoryAvailability = [];
+    
+    filters.forEach(filter => {
+        const allocations = getWeeklyAccessoryAllocations(filter, startDate, endDate);
+        allocations.forEach(allocation => {
+            const key = allocation.name;
+            if (accessoryUsage.has(key)) {
+                const existing = accessoryUsage.get(key);
+                existing.totalAllocated += allocation.totalQuantity;
+                existing.filtersUsing.add(filter.name);
+            } else {
+                accessoryUsage.set(key, {
+                    name: allocation.name,
+                    totalAllocated: allocation.totalQuantity,
+                    unit: allocation.unit,
+                    filtersUsing: new Set([filter.name])
+                });
+            }
+        });
+    });
+    
+    // Check availability status for each accessory
+    accessories.forEach(accessory => {
+        const usage = accessoryUsage.get(accessory.name);
+        const allocated = usage ? usage.totalAllocated : 0;
+        const available = accessory.quantity - allocated;
+        
+        accessoryAvailability.push({
+            name: accessory.name,
+            pool: accessory.pool,
+            total: accessory.quantity,
+            allocated: allocated,
+            available: available,
+            unit: accessory.unit || '',
+            percentUsed: accessory.quantity > 0 ? Math.round((allocated / accessory.quantity) * 100) : 0
+        });
+    });
+    
+    return {
+        usage: Array.from(accessoryUsage.values()),
+        availability: accessoryAvailability.sort((a, b) => b.percentUsed - a.percentUsed)
+    };
 }
 
 async function copyEmailToClipboard() {
@@ -750,6 +1265,8 @@ document.querySelector('.close').addEventListener('click', closeModal);
 window.addEventListener('click', function(event) {
     const modal = document.getElementById('modal');
     const emailModal = document.getElementById('emailModal');
+    const accessoryModal = document.getElementById('accessoryModal');
+    const accessoryFormModal = document.getElementById('accessoryFormModal');
     
     if (event.target === modal) {
         closeModal();
@@ -757,6 +1274,14 @@ window.addEventListener('click', function(event) {
     
     if (event.target === emailModal) {
         closeEmailModal();
+    }
+    
+    if (event.target === accessoryModal) {
+        closeAccessoryModal();
+    }
+    
+    if (event.target === accessoryFormModal) {
+        closeAccessoryForm();
     }
 });
 
@@ -767,3 +1292,4 @@ document.addEventListener('mousemove', resetInactivityTimer);
 
 // Initialize
 fetchFilters();
+fetchAccessories();

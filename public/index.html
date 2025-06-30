@@ -11,6 +11,10 @@
         <header>
             <h1>Industrial Filter Status Tracker</h1>
             <div class="header-controls">
+                <button id="accessoryBtn" class="accessory-btn">
+                    <span class="accessory-icon">🔧</span>
+                    <span class="accessory-text">Manage Accessories</span>
+                </button>
                 <button id="emailBtn" class="email-btn">
                     <span class="email-icon">📧</span>
                     <span class="email-text">Send Email</span>
@@ -51,6 +55,64 @@
                 <div class="email-actions">
                     <button id="copyEmailBtn" class="btn-primary">Copy to Clipboard</button>
                     <button id="closeEmailBtn" class="btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="accessoryModal" class="modal">
+        <div class="modal-content accessory-modal-content">
+            <span class="close accessory-close">&times;</span>
+            <h2>Accessory Pool Management</h2>
+            <div class="accessory-content">
+                <div class="accessory-header">
+                    <div class="pool-selector">
+                        <button id="nswPoolBtn" class="pool-btn active">NSW Pool (Filter 4)</button>
+                        <button id="waPoolBtn" class="pool-btn">WA Pool (Filters 1,2,3)</button>
+                    </div>
+                    <button id="addAccessoryBtn" class="btn-primary">Add New Accessory</button>
+                </div>
+                <div class="accessory-body">
+                    <div id="accessoryList" class="accessory-list"></div>
+                </div>
+                <div class="accessory-actions">
+                    <button id="closeAccessoryBtn" class="btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="accessoryFormModal" class="modal">
+        <div class="modal-content">
+            <span class="close accessory-form-close">&times;</span>
+            <h2 id="accessoryFormTitle">Add New Accessory</h2>
+            <div class="accessory-form">
+                <div class="form-group">
+                    <label>Accessory Name</label>
+                    <input type="text" id="accessoryName" placeholder="Enter accessory name">
+                </div>
+                <div class="form-group">
+                    <label>Pool</label>
+                    <select id="accessoryPool">
+                        <option value="NSW">NSW (Filter 4 only)</option>
+                        <option value="WA">WA (Filters 1, 2, 3)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Quantity</label>
+                    <input type="number" id="accessoryQuantity" min="1" value="1">
+                </div>
+                <div class="form-group">
+                    <label>Unit (optional)</label>
+                    <input type="text" id="accessoryUnit" placeholder="e.g., m, pcs, sets">
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="accessoryNotes" rows="3" placeholder="Add notes about this accessory..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button id="saveAccessoryBtn" class="btn-primary">Save Accessory</button>
+                    <button id="cancelAccessoryBtn" class="btn-secondary">Cancel</button>
                 </div>
             </div>
         </div>
