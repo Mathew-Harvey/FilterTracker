@@ -504,8 +504,8 @@ function openFilterModal(filterId) {
         </div>
         
         <div class="form-group">
-            <label>Schedule Bookings (Next 4 Weeks)</label>
-            ${isUnlocked ? '<p class="booking-instructions">Click and drag to select date ranges, then enter job location and select accessories below</p>' : ''}
+            <label>Schedule Bookings (From Today - Next 4 Weeks)</label>
+            ${isUnlocked ? '<p class="booking-instructions">Click and drag to select date ranges from today forward, then enter job location and select accessories below</p>' : ''}
             <div id="calendar" class="calendar"></div>
         </div>
         
@@ -550,33 +550,45 @@ function openFilterModal(filterId) {
 function renderCalendar() {
     const calendar = document.getElementById('calendar');
     const today = new Date();
-    const weeks = [];
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
     
     // Add day headers
     const dayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     
-    for (let w = 0; w < 4; w++) {
+    // Start from the beginning of the current week (Sunday)
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    
+    const weeks = [];
+    
+    // Generate 6 weeks to ensure we show at least 4 weeks from today
+    for (let w = 0; w < 6; w++) {
         const week = [];
         for (let d = 0; d < 7; d++) {
-            const date = new Date(today);
-            date.setDate(today.getDate() + (w * 7) + d);
+            const date = new Date(startOfWeek);
+            date.setDate(startOfWeek.getDate() + (w * 7) + d);
             week.push(date);
         }
         weeks.push(week);
     }
     
+    // Filter to only show weeks that contain dates from today forward
+    const relevantWeeks = weeks.filter(week => 
+        week.some(date => date >= today)
+    ).slice(0, 4); // Limit to 4 weeks
+    
     calendar.innerHTML = `
         <div class="calendar-header">
             ${dayHeaders.map(day => `<div class="day-header">${day}</div>`).join('')}
         </div>
-        ${weeks.map(week => `
+        ${relevantWeeks.map(week => `
             <div class="week">
                 ${week.map(date => {
                     const dateStr = date.toISOString().split('T')[0];
                     const isBooked = selectedFilter.bookings?.some(b => b.date === dateStr);
                     const isPending = pendingBookings.some(b => b.dates.includes(dateStr));
                     const isSelected = currentBookingDates.includes(dateStr);
-                    const isPast = date < today.setHours(0,0,0,0);
+                    const isPast = date < today;
                     
                     return `
                         <div class="day ${isBooked ? 'booked' : ''} ${isPending ? 'pending' : ''} ${isSelected ? 'selected' : ''} ${isPast ? 'past' : ''}" 
