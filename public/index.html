@@ -110,9 +110,66 @@
                     <label>Notes</label>
                     <textarea id="accessoryNotes" rows="3" placeholder="Add notes about this accessory..."></textarea>
                 </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="outOfServiceCheck" onchange="toggleOutOfServiceFields()">
+                        <span class="checkmark"></span>
+                        Out of Service / Maintenance Mode
+                    </label>
+                </div>
+                <div id="serviceFields" class="service-fields" style="display: none;">
+                    <div class="form-group">
+                        <label>Service Start Date</label>
+                        <input type="date" id="serviceStartDate">
+                    </div>
+                    <div class="form-group">
+                        <label>Service End Date</label>
+                        <input type="date" id="serviceEndDate">
+                    </div>
+                    <div class="form-group">
+                        <label>Service Reason</label>
+                        <input type="text" id="serviceReason" placeholder="e.g., Maintenance, Repair, Inspection...">
+                    </div>
+                </div>
                 <div class="modal-actions">
                     <button id="saveAccessoryBtn" class="btn-primary">Save Accessory</button>
                     <button id="cancelAccessoryBtn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="outOfServiceModal" class="modal">
+        <div class="modal-content">
+            <span class="close out-of-service-close">&times;</span>
+            <h2 id="outOfServiceTitle">Set Out of Service</h2>
+            <div class="out-of-service-form">
+                <div class="accessory-info-display">
+                    <div class="accessory-name-display" id="serviceAccessoryName"></div>
+                    <div class="accessory-pool-display" id="serviceAccessoryPool"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Select Service Period</label>
+                    <p class="date-picker-instructions">Click and drag to select the out-of-service period</p>
+                    <div id="serviceDateCalendar" class="service-calendar"></div>
+                </div>
+                
+                <div class="selected-service-period" id="selectedServicePeriod" style="display: none;">
+                    <div class="period-display">
+                        <span id="servicePeriodText"></span>
+                        <button class="btn-cancel" onclick="clearServiceSelection()">Clear Selection</button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Service Reason</label>
+                    <input type="text" id="serviceReasonInput" placeholder="e.g., Maintenance, Repair, Inspection...">
+                </div>
+                
+                <div class="modal-actions">
+                    <button id="confirmOutOfServiceBtn" class="btn-primary">Confirm Out of Service</button>
+                    <button id="cancelOutOfServiceBtn" class="btn-secondary">Cancel</button>
                 </div>
             </div>
         </div>

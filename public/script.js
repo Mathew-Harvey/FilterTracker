@@ -42,6 +42,18 @@ async function fetchAccessories() {
     try {
         const response = await fetch('/api/accessories');
         accessories = await response.json();
+        
+        // Ensure all accessories have outOfService field for backward compatibility
+        accessories = accessories.map(accessory => ({
+            ...accessory,
+            outOfService: accessory.outOfService || { 
+                isOutOfService: false, 
+                startDate: null, 
+                endDate: null, 
+                reason: "" 
+            }
+        }));
+        
         renderAccessoryList();
     } catch (error) {
         console.error('Error fetching accessories:', error);
@@ -219,19 +231,59 @@ function renderAccessoryList() {
     }
     
     container.innerHTML = poolAccessories.map(accessory => {
-        const quantityClass = accessory.quantity <= 1 ? 'limited' : 
+        const isOutOfService = accessory.outOfService && accessory.outOfService.isOutOfService;
+        const quantityClass = isOutOfService ? 'out-of-service' :
+                              accessory.quantity <= 1 ? 'limited' : 
                               accessory.quantity === 0 ? 'unavailable' : '';
         
+        // Calculate current allocations across all filters
+        let currentAllocated = 0;
+        if (filters && filters.length > 0) {
+            const today = new Date();
+            const nextWeek = new Date(today);
+            nextWeek.setDate(today.getDate() + 7);
+            
+            filters.forEach(filter => {
+                if (filter.bookings) {
+                    filter.bookings.forEach(booking => {
+                        const bookingDate = new Date(booking.date);
+                        // Only count current and future bookings
+                        if (bookingDate >= today && booking.accessories) {
+                            const allocation = booking.accessories.find(a => a.id === accessory.id);
+                            if (allocation) {
+                                currentAllocated += allocation.quantity;
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        
+        // Check if currently out of service
+        let outOfServiceStatus = '';
+        if (isOutOfService) {
+            const startDate = new Date(accessory.outOfService.startDate).toLocaleDateString();
+            const endDate = new Date(accessory.outOfService.endDate).toLocaleDateString();
+            outOfServiceStatus = `
+                <div class="out-of-service-banner">
+                    🔧 OUT OF SERVICE: ${startDate} - ${endDate}
+                    ${accessory.outOfService.reason ? `<br><small>${accessory.outOfService.reason}</small>` : ''}
+                </div>
+            `;
+        }
+        
         return `
-            <div class="accessory-item">
+            <div class="accessory-item ${isOutOfService ? 'out-of-service-item' : ''}">
                 <div class="accessory-item-header">
                     <div>
                         <div class="accessory-name">${accessory.name}</div>
                         <div class="accessory-pool">${accessory.pool}</div>
                     </div>
+                    ${isOutOfService ? '<div class="service-status-icon">🔧</div>' : ''}
                 </div>
+                ${outOfServiceStatus}
                 <div class="accessory-quantity ${quantityClass}">
-                    ${accessory.quantity} ${accessory.unit || 'units'}
+                    ${isOutOfService ? 'OUT OF SERVICE' : `${accessory.quantity} ${accessory.unit || 'units'}`}
                 </div>
                 <div class="accessory-details">
                     <div class="accessory-detail">
@@ -240,14 +292,28 @@ function renderAccessoryList() {
                     </div>
                     <div class="accessory-detail">
                         <span>Currently Allocated:</span>
-                        <span>0</span>
+                        <span class="${currentAllocated > 0 ? 'allocated-quantity' : ''}">${currentAllocated}</span>
                     </div>
+                    <div class="accessory-detail">
+                        <span>Available Now:</span>
+                        <span class="${Math.max(0, accessory.quantity - currentAllocated) === 0 ? 'unavailable-quantity' : 'available-quantity'}">${Math.max(0, accessory.quantity - currentAllocated)}</span>
+                    </div>
+                    ${isOutOfService ? `
+                    <div class="accessory-detail">
+                        <span>Service Period:</span>
+                        <span>${new Date(accessory.outOfService.startDate).toLocaleDateString()} - ${new Date(accessory.outOfService.endDate).toLocaleDateString()}</span>
+                    </div>
+                    ` : ''}
                 </div>
                 <div class="accessory-notes ${!accessory.notes ? 'empty' : ''}">
                     ${accessory.notes || 'No notes'}
                 </div>
                 <div class="accessory-actions">
                     <button class="btn-edit" onclick="editAccessory(${accessory.id})">Edit</button>
+                    ${isOutOfService ? 
+                        `<button class="btn-service" onclick="clearOutOfService(${accessory.id})">Return to Service</button>` :
+                        `<button class="btn-service" onclick="setOutOfService(${accessory.id})">Set Out of Service</button>`
+                    }
                     <button class="btn-delete" onclick="confirmDeleteAccessory(${accessory.id})">Delete</button>
                 </div>
             </div>
@@ -267,6 +333,15 @@ function openAccessoryForm(accessory = null) {
         document.getElementById('accessoryQuantity').value = accessory.quantity;
         document.getElementById('accessoryUnit').value = accessory.unit || '';
         document.getElementById('accessoryNotes').value = accessory.notes || '';
+        
+        // Set out of service fields
+        const outOfService = accessory.outOfService || { isOutOfService: false, startDate: null, endDate: null, reason: '' };
+        document.getElementById('outOfServiceCheck').checked = outOfService.isOutOfService;
+        document.getElementById('serviceStartDate').value = outOfService.startDate || '';
+        document.getElementById('serviceEndDate').value = outOfService.endDate || '';
+        document.getElementById('serviceReason').value = outOfService.reason || '';
+        
+        toggleOutOfServiceFields();
     } else {
         title.textContent = 'Add New Accessory';
         document.getElementById('accessoryName').value = '';
@@ -274,6 +349,14 @@ function openAccessoryForm(accessory = null) {
         document.getElementById('accessoryQuantity').value = 1;
         document.getElementById('accessoryUnit').value = '';
         document.getElementById('accessoryNotes').value = '';
+        
+        // Reset out of service fields
+        document.getElementById('outOfServiceCheck').checked = false;
+        document.getElementById('serviceStartDate').value = '';
+        document.getElementById('serviceEndDate').value = '';
+        document.getElementById('serviceReason').value = '';
+        
+        toggleOutOfServiceFields();
     }
     
     modal.style.display = 'block';
@@ -298,12 +381,250 @@ function confirmDeleteAccessory(accessoryId) {
     }
 }
 
+// Out of service modal state
+let currentServiceAccessory = null;
+let serviceSelectedDates = [];
+let serviceIsDragging = false;
+let serviceDragStartDate = null;
+
+function setOutOfService(accessoryId) {
+    const accessory = accessories.find(acc => acc.id === accessoryId);
+    if (!accessory) return;
+    
+    currentServiceAccessory = accessory;
+    serviceSelectedDates = [];
+    
+    const modal = document.getElementById('outOfServiceModal');
+    document.getElementById('serviceAccessoryName').textContent = accessory.name;
+    document.getElementById('serviceAccessoryPool').textContent = accessory.pool;
+    document.getElementById('serviceReasonInput').value = '';
+    
+    renderServiceCalendar();
+    modal.style.display = 'block';
+}
+
+function renderServiceCalendar() {
+    const calendar = document.getElementById('serviceDateCalendar');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Day headers
+    const dayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    // Start from today, show next 8 weeks
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - today.getDay()); // Start of current week
+    
+    const weeks = [];
+    for (let w = 0; w < 8; w++) {
+        const week = [];
+        for (let d = 0; d < 7; d++) {
+            const date = new Date(startDate);
+            date.setDate(startDate.getDate() + (w * 7) + d);
+            week.push(date);
+        }
+        weeks.push(week);
+    }
+    
+    calendar.innerHTML = `
+        <div class="calendar-header">
+            ${dayHeaders.map(day => `<div class="day-header">${day}</div>`).join('')}
+        </div>
+        ${weeks.map(week => `
+            <div class="week">
+                ${week.map(date => {
+                    const dateStr = date.toISOString().split('T')[0];
+                    const isPast = date < today;
+                    const isSelected = serviceSelectedDates.includes(dateStr);
+                    
+                    return `
+                        <div class="day ${isPast ? 'past' : ''} ${isSelected ? 'selected' : ''}" 
+                             data-date="${dateStr}" 
+                             onmousedown="startServiceDateDrag('${dateStr}')"
+                             onmouseenter="handleServiceDateDrag('${dateStr}')"
+                             onmouseup="endServiceDateDrag()"
+                             ${isPast ? 'style="cursor: default"' : ''}>
+                            <span class="day-number">${date.getDate()}</span>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `).join('')}
+    `;
+    
+    // Add mouse event listeners
+    document.addEventListener('mouseup', endServiceDateDrag);
+    document.addEventListener('selectstart', e => e.preventDefault());
+}
+
+function startServiceDateDrag(dateStr) {
+    const dayElement = document.querySelector(`#serviceDateCalendar [data-date="${dateStr}"]`);
+    if (dayElement.classList.contains('past')) return;
+    
+    serviceIsDragging = true;
+    serviceDragStartDate = dateStr;
+    serviceSelectedDates = [dateStr];
+    updateServiceDateSelection();
+    updateServicePeriodDisplay();
+}
+
+function handleServiceDateDrag(dateStr) {
+    if (!serviceIsDragging) return;
+    
+    const dayElement = document.querySelector(`#serviceDateCalendar [data-date="${dateStr}"]`);
+    if (dayElement.classList.contains('past')) return;
+    
+    // Calculate date range from start to current
+    const startDate = new Date(serviceDragStartDate);
+    const endDate = new Date(dateStr);
+    
+    serviceSelectedDates = [];
+    const currentDate = new Date(Math.min(startDate, endDate));
+    const finalDate = new Date(Math.max(startDate, endDate));
+    
+    while (currentDate <= finalDate) {
+        const currentDateStr = currentDate.toISOString().split('T')[0];
+        const dayEl = document.querySelector(`#serviceDateCalendar [data-date="${currentDateStr}"]`);
+        
+        if (dayEl && !dayEl.classList.contains('past')) {
+            serviceSelectedDates.push(currentDateStr);
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    updateServiceDateSelection();
+    updateServicePeriodDisplay();
+}
+
+function endServiceDateDrag() {
+    serviceIsDragging = false;
+    serviceDragStartDate = null;
+}
+
+function updateServiceDateSelection() {
+    // Clear all selected states
+    document.querySelectorAll('#serviceDateCalendar .day').forEach(day => {
+        day.classList.remove('selected');
+    });
+    
+    // Add selected state to service dates
+    serviceSelectedDates.forEach(dateStr => {
+        const dayElement = document.querySelector(`#serviceDateCalendar [data-date="${dateStr}"]`);
+        if (dayElement) {
+            dayElement.classList.add('selected');
+        }
+    });
+}
+
+function updateServicePeriodDisplay() {
+    const periodDiv = document.getElementById('selectedServicePeriod');
+    const periodText = document.getElementById('servicePeriodText');
+    
+    if (serviceSelectedDates.length === 0) {
+        periodDiv.style.display = 'none';
+        return;
+    }
+    
+    periodDiv.style.display = 'block';
+    
+    if (serviceSelectedDates.length === 1) {
+        periodText.textContent = `Service Date: ${new Date(serviceSelectedDates[0]).toLocaleDateString()}`;
+    } else {
+        const sortedDates = serviceSelectedDates.sort();
+        const startDate = new Date(sortedDates[0]).toLocaleDateString();
+        const endDate = new Date(sortedDates[sortedDates.length - 1]).toLocaleDateString();
+        periodText.textContent = `Service Period: ${startDate} - ${endDate} (${serviceSelectedDates.length} days)`;
+    }
+}
+
+function clearServiceSelection() {
+    serviceSelectedDates = [];
+    updateServiceDateSelection();
+    updateServicePeriodDisplay();
+}
+
+function confirmOutOfService() {
+    if (serviceSelectedDates.length === 0) {
+        alert('Please select a service period');
+        return;
+    }
+    
+    if (!currentServiceAccessory) return;
+    
+    const reason = document.getElementById('serviceReasonInput').value.trim();
+    const sortedDates = serviceSelectedDates.sort();
+    const startDate = sortedDates[0];
+    const endDate = sortedDates[sortedDates.length - 1];
+    
+    const outOfService = {
+        isOutOfService: true,
+        startDate: startDate,
+        endDate: endDate,
+        reason: reason
+    };
+    
+    updateAccessory(currentServiceAccessory.id, { outOfService });
+    closeOutOfServiceModal();
+}
+
+function closeOutOfServiceModal() {
+    document.getElementById('outOfServiceModal').style.display = 'none';
+    currentServiceAccessory = null;
+    serviceSelectedDates = [];
+}
+
+function clearOutOfService(accessoryId) {
+    const accessory = accessories.find(acc => acc.id === accessoryId);
+    if (!accessory) return;
+    
+    if (confirm(`Return "${accessory.name}" to service?`)) {
+        const outOfService = {
+            isOutOfService: false,
+            startDate: null,
+            endDate: null,
+            reason: ''
+        };
+        
+        updateAccessory(accessoryId, { outOfService });
+    }
+}
+
+function toggleOutOfServiceFields() {
+    const isChecked = document.getElementById('outOfServiceCheck').checked;
+    const serviceFields = document.getElementById('serviceFields');
+    serviceFields.style.display = isChecked ? 'block' : 'none';
+    
+    // Set default dates if enabling out of service
+    if (isChecked) {
+        const today = new Date().toISOString().split('T')[0];
+        const nextWeek = new Date();
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        const defaultEndDate = nextWeek.toISOString().split('T')[0];
+        
+        if (!document.getElementById('serviceStartDate').value) {
+            document.getElementById('serviceStartDate').value = today;
+        }
+        if (!document.getElementById('serviceEndDate').value) {
+            document.getElementById('serviceEndDate').value = defaultEndDate;
+        }
+    }
+}
+
 async function saveAccessory() {
     const name = document.getElementById('accessoryName').value.trim();
     const pool = document.getElementById('accessoryPool').value;
     const quantity = parseInt(document.getElementById('accessoryQuantity').value);
     const unit = document.getElementById('accessoryUnit').value.trim();
     const notes = document.getElementById('accessoryNotes').value.trim();
+    
+    // Get out of service data
+    const isOutOfService = document.getElementById('outOfServiceCheck').checked;
+    const outOfService = {
+        isOutOfService: isOutOfService,
+        startDate: isOutOfService ? document.getElementById('serviceStartDate').value : null,
+        endDate: isOutOfService ? document.getElementById('serviceEndDate').value : null,
+        reason: isOutOfService ? document.getElementById('serviceReason').value.trim() : ''
+    };
     
     if (!name) {
         alert('Please enter an accessory name');
@@ -315,7 +636,19 @@ async function saveAccessory() {
         return;
     }
     
-    const accessoryData = { name, pool, quantity, unit, notes };
+    if (isOutOfService) {
+        if (!outOfService.startDate || !outOfService.endDate) {
+            alert('Please enter both start and end dates for out of service period');
+            return;
+        }
+        
+        if (new Date(outOfService.startDate) >= new Date(outOfService.endDate)) {
+            alert('End date must be after start date');
+            return;
+        }
+    }
+    
+    const accessoryData = { name, pool, quantity, unit, notes, outOfService };
     
     let success = false;
     if (currentEditingAccessory) {
@@ -352,27 +685,49 @@ async function renderAccessorySelection() {
     container.innerHTML = `
         <h4>Available Accessories for Selected Dates</h4>
         <div class="available-accessories">
-            ${availableAccessories.map(accessory => `
-                <div class="available-accessory" data-accessory-id="${accessory.id}">
-                    <div class="accessory-info">
-                        <div class="accessory-info-name">${accessory.name}</div>
-                        <div class="accessory-info-available">
-                            Available: ${accessory.availableQuantity}/${accessory.quantity} ${accessory.unit || ''}
+            ${availableAccessories.map(accessory => {
+                const isOutOfService = accessory.isOutOfServiceDuringPeriod || false;
+                const availableQty = Math.max(0, accessory.availableQuantity); // Ensure non-negative
+                const isDisabled = availableQty === 0 || isOutOfService;
+                const allocatedDisplay = accessory.allocatedCount > 0 ? ` (${accessory.allocatedCount} allocated)` : '';
+                
+                return `
+                    <div class="available-accessory ${isOutOfService ? 'out-of-service' : ''} ${isDisabled ? 'disabled' : ''}" data-accessory-id="${accessory.id}">
+                        <div class="accessory-info">
+                            <div class="accessory-info-name">
+                                ${accessory.name}
+                                ${isOutOfService ? ' 🔧' : ''}
+                            </div>
+                            <div class="accessory-info-available">
+                                ${isOutOfService ? 
+                                    `<span class="out-of-service-text">OUT OF SERVICE (${new Date(accessory.outOfService.startDate).toLocaleDateString()} - ${new Date(accessory.outOfService.endDate).toLocaleDateString()})</span>` :
+                                    `Available: ${availableQty}/${accessory.quantity}${accessory.unit ? ` ${accessory.unit}` : ''}${allocatedDisplay}`
+                                }
+                            </div>
+                            ${isOutOfService && accessory.outOfService.reason ? 
+                                `<div class="service-reason">Reason: ${accessory.outOfService.reason}</div>` : 
+                                ''
+                            }
+                        </div>
+                        <div class="accessory-input">
+                            <input type="number" 
+                                   min="0" 
+                                   max="${availableQty}" 
+                                   value="0" 
+                                   step="1"
+                                   id="qty-${accessory.id}"
+                                   ${isDisabled ? 'disabled' : ''}
+                                   onchange="updateAccessorySelection(${accessory.id})"
+                                   oninput="validateNumberInput(this)">
+                            <button onclick="quickSelectAccessory(${accessory.id}, ${Math.min(1, availableQty)})"
+                                    ${isDisabled ? 'disabled' : ''}
+                                    title="${isDisabled ? 'Not available' : `Add ${Math.min(1, availableQty)} unit${Math.min(1, availableQty) !== 1 ? 's' : ''}`}">
+                                Add
+                            </button>
                         </div>
                     </div>
-                    <div class="accessory-input">
-                        <input type="number" 
-                               min="0" 
-                               max="${accessory.availableQuantity}" 
-                               value="0" 
-                               id="qty-${accessory.id}"
-                               onchange="updateAccessorySelection(${accessory.id})">
-                        <button onclick="quickSelectAccessory(${accessory.id}, ${Math.min(1, accessory.availableQuantity)})">
-                            Add
-                        </button>
-                    </div>
-                </div>
-            `).join('')}
+                `;
+            }).join('')}
         </div>
         <div class="selected-accessories" id="selectedAccessoriesDisplay"></div>
     `;
@@ -380,21 +735,93 @@ async function renderAccessorySelection() {
     updateSelectedAccessoriesDisplay();
 }
 
+// Helper function to validate number inputs in real-time
+function validateNumberInput(input) {
+    const min = parseInt(input.getAttribute('min')) || 0;
+    const max = parseInt(input.getAttribute('max')) || 0;
+    let value = parseInt(input.value) || 0;
+    
+    // Ensure value is within bounds
+    if (value < min) {
+        input.value = min;
+    } else if (value > max && max > 0) {
+        input.value = max;
+    }
+    
+    // Remove any non-numeric characters (except for the initial input)
+    if (isNaN(value) || value < 0) {
+        input.value = min;
+    }
+    
+    // Prevent negative values by handling keydown events
+    input.addEventListener('keydown', function(e) {
+        // Allow: backspace, delete, tab, escape, enter, home, end, left, right, up, down
+        if ([46, 8, 9, 27, 13, 110, 35, 36, 37, 39, 38, 40].indexOf(e.keyCode) !== -1 ||
+            // Allow Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+            (e.keyCode === 65 && e.ctrlKey === true) ||
+            (e.keyCode === 67 && e.ctrlKey === true) ||
+            (e.keyCode === 86 && e.ctrlKey === true) ||
+            (e.keyCode === 88 && e.ctrlKey === true)) {
+            return;
+        }
+        // Ensure that it is a number and stop the keypress
+        if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
+            e.preventDefault();
+        }
+        // Prevent minus key (45) and plus key (43)
+        if (e.keyCode === 45 || e.keyCode === 43) {
+            e.preventDefault();
+        }
+    });
+    
+    // Also handle paste events to validate pasted content
+    input.addEventListener('paste', function(e) {
+        setTimeout(() => {
+            validateNumberInput(input);
+        }, 1);
+    });
+}
+
 function updateAccessorySelection(accessoryId) {
     const input = document.getElementById(`qty-${accessoryId}`);
-    const quantity = parseInt(input.value) || 0;
+    const quantity = Math.max(0, parseInt(input.value) || 0); // Ensure non-negative
+    
+    // Find the available accessory data to check constraints
+    const availableAccessories = document.querySelectorAll('[data-accessory-id]');
+    let maxAvailable = 0;
+    
+    for (const element of availableAccessories) {
+        if (parseInt(element.dataset.accessoryId) === accessoryId) {
+            const maxInput = element.querySelector('input[type="number"]');
+            maxAvailable = parseInt(maxInput.getAttribute('max')) || 0;
+            break;
+        }
+    }
+    
+    // Validate quantity doesn't exceed available
+    const validatedQuantity = Math.min(quantity, Math.max(0, maxAvailable));
+    
+    // Update input field with validated value
+    if (validatedQuantity !== quantity) {
+        input.value = validatedQuantity;
+        if (maxAvailable <= 0) {
+            alert('This accessory is not available for the selected dates.');
+        } else {
+            alert(`Maximum available quantity is ${maxAvailable}. Quantity adjusted.`);
+        }
+    }
     
     // Remove existing selection for this accessory
     selectedAccessories = selectedAccessories.filter(sel => sel.id !== accessoryId);
     
     // Add new selection if quantity > 0
-    if (quantity > 0) {
+    if (validatedQuantity > 0) {
         const accessory = accessories.find(acc => acc.id === accessoryId);
         if (accessory) {
             selectedAccessories.push({
                 id: accessoryId,
                 name: accessory.name,
-                quantity: quantity,
+                quantity: validatedQuantity,
                 unit: accessory.unit || ''
             });
         }
@@ -405,7 +832,9 @@ function updateAccessorySelection(accessoryId) {
 
 function quickSelectAccessory(accessoryId, quantity) {
     const input = document.getElementById(`qty-${accessoryId}`);
-    input.value = quantity;
+    const maxAllowed = parseInt(input.getAttribute('max')) || 0;
+    const safeQuantity = Math.min(Math.max(0, quantity), maxAllowed);
+    input.value = safeQuantity;
     updateAccessorySelection(accessoryId);
 }
 
@@ -422,7 +851,7 @@ function updateSelectedAccessoriesDisplay() {
         <h5>Selected Accessories:</h5>
         ${selectedAccessories.map(accessory => `
             <div class="selected-accessory-item">
-                <span>${accessory.name} - ${accessory.quantity} ${accessory.unit}</span>
+                <span>${accessory.name} - ${accessory.quantity}${accessory.unit ? ` ${accessory.unit}` : ''}</span>
                 <button class="selected-accessory-remove" onclick="removeSelectedAccessory(${accessory.id})">
                     Remove
                 </button>
@@ -800,7 +1229,7 @@ function renderPendingBookings() {
                 const isService = booking.type === 'service';
                 
                 const accessoryCount = booking.accessories ? booking.accessories.length : 0;
-                const accessoryText = accessoryCount > 0 ? ` (${accessoryCount} accessories)` : '';
+                const accessoryText = accessoryCount > 0 ? ` (${accessoryCount} accessory type${accessoryCount !== 1 ? 's' : ''})` : '';
                 
                 return `
                     <div class="pending-item ${isService ? 'service-booking' : ''}">
@@ -823,19 +1252,237 @@ function removePendingBooking(index) {
 function renderBookings(bookings) {
     if (!bookings || bookings.length === 0) return '<p>No current bookings</p>';
     
-    return bookings.map(booking => {
-        const isService = booking.type === 'service';
-        const accessoryCount = booking.accessories ? booking.accessories.length : 0;
-        const accessoryText = accessoryCount > 0 ? ` (${accessoryCount} accessories)` : '';
+    // Group bookings by consecutive dates and same location/type
+    const groupedBookings = groupConsecutiveBookings(bookings);
+    
+    return groupedBookings.map((group, groupIndex) => {
+        const isService = group.type === 'service';
+        const hasAccessories = group.accessories && group.accessories.length > 0;
+        
+        // Format date range
+        let dateDisplay;
+        if (group.dates.length === 1) {
+            dateDisplay = new Date(group.dates[0]).toLocaleDateString();
+        } else {
+            const sortedDates = group.dates.sort();
+            const startDate = new Date(sortedDates[0]).toLocaleDateString();
+            const endDate = new Date(sortedDates[sortedDates.length - 1]).toLocaleDateString();
+            dateDisplay = `${startDate} - ${endDate}`;
+        }
+        
+        // Create unique ID for this booking group
+        const bookingId = `booking-${groupIndex}`;
         
         return `
-            <div class="booking-item ${isService ? 'service-booking' : ''}">
-                <span>${new Date(booking.date).toLocaleDateString()} - ${booking.location} ${isService ? '🔧' : ''}${accessoryText}</span>
-                ${isUnlocked ? `<button class="remove-booking" onclick="removeBooking('${booking.date}')">Remove</button>` : ''}
+            <div class="booking-item-container ${isService ? 'service-booking' : ''}">
+                <div class="booking-item-header ${hasAccessories ? 'clickable' : ''}" ${hasAccessories ? `onclick="toggleBookingDetails('${bookingId}')"` : ''}>
+                    <div class="booking-main-info">
+                        <div class="booking-date-range">${dateDisplay}</div>
+                        <div class="booking-location">${group.location} ${isService ? '🔧' : ''}</div>
+                        ${hasAccessories ? `
+                            <div class="booking-accessories-summary">
+                                ${group.accessories.length} accessory type${group.accessories.length !== 1 ? 's' : ''}${group.dates.length > 1 ? ' (daily)' : ''}
+                                <span class="expand-icon" id="${bookingId}-icon">▼</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                    ${isUnlocked ? `
+                        <div class="booking-actions">
+                            <button class="btn-cancel-booking" onclick="event.stopPropagation(); confirmCancelEntireBooking('${group.dates.join(',')}', '${group.location}')" title="Cancel entire booking">
+                                Cancel Booking
+                            </button>
+                            <div class="booking-actions-dropdown">
+                                <button class="booking-menu-btn" onclick="event.stopPropagation(); toggleBookingMenu('${bookingId}')">
+                                    <span>⋮</span>
+                                </button>
+                                <div class="booking-menu" id="${bookingId}-menu" style="display: none;">
+                                    <button class="menu-item edit" onclick="event.stopPropagation(); editBookingLocation('${group.dates.join(',')}', '${group.location}')">
+                                        <span class="menu-icon">✏️</span>
+                                        Edit Location
+                                    </button>
+                                    ${hasAccessories ? `
+                                        <button class="menu-item edit" onclick="event.stopPropagation(); editBookingAccessories('${group.dates.join(',')}', '${bookingId}')">
+                                            <span class="menu-icon">🔧</span>
+                                            Manage Accessories
+                                        </button>
+                                        <div class="menu-divider"></div>
+                                    ` : ''}
+                                    ${group.dates.length === 1 ? `
+                                        <button class="menu-item delete" onclick="event.stopPropagation(); confirmRemoveBooking('${group.dates[0]}')">
+                                            <span class="menu-icon">🗑️</span>
+                                            Remove This Day
+                                        </button>
+                                    ` : `
+                                        <div class="menu-section">
+                                            <div class="menu-label">Remove individual days:</div>
+                                            ${group.dates.map(date => `
+                                                <button class="menu-item" onclick="event.stopPropagation(); confirmRemoveBooking('${date}')">
+                                                    <span class="menu-icon">×</span>
+                                                    ${new Date(date).toLocaleDateString()}
+                                                </button>
+                                            `).join('')}
+                                        </div>
+                                        <div class="menu-divider"></div>
+                                        <button class="menu-item delete" onclick="event.stopPropagation(); confirmCancelEntireBooking('${group.dates.join(',')}', '${group.location}')">
+                                            <span class="menu-icon">🗑️</span>
+                                            Cancel Entire Booking
+                                        </button>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+                ${hasAccessories ? `
+                    <div class="booking-details" id="${bookingId}" style="display: none;">
+                        <div class="accessories-list">
+                            <div class="accessories-header">
+                                <h5>Accessories for this booking:</h5>
+                                ${isUnlocked ? `
+                                    <button class="btn-edit-accessories" onclick="editBookingAccessories('${group.dates.join(',')}', '${bookingId}')">
+                                        Edit Accessories
+                                    </button>
+                                ` : ''}
+                            </div>
+                            <div class="accessories-items" id="${bookingId}-accessories">
+                                ${group.accessories.map((accessory, accIndex) => {
+                                    // Format quantity with proper spacing and handling of units
+                                    let quantityDisplay = accessory.quantity;
+                                    if (accessory.unit && accessory.unit.trim()) {
+                                        quantityDisplay += ` ${accessory.unit.trim()}`;
+                                    }
+                                    
+                                    // Add "per day" indicator for multi-day bookings
+                                    if (group.dates.length > 1) {
+                                        quantityDisplay += ' per day';
+                                    }
+                                    
+                                    return `
+                                        <div class="accessory-detail-item" data-accessory-index="${accIndex}">
+                                            <span class="accessory-name">${accessory.name}</span>
+                                            <span class="accessory-quantity">${quantityDisplay}</span>
+                                            ${isUnlocked ? `
+                                                <button class="remove-accessory-btn" onclick="removeAccessoryFromBooking('${group.dates.join(',')}', ${accessory.id || `'${accessory.name}'`})" title="Remove this accessory">
+                                                    ×
+                                                </button>
+                                            ` : ''}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
             </div>
         `;
     }).join('');
 }
+
+function groupConsecutiveBookings(bookings) {
+    if (!bookings || bookings.length === 0) return [];
+    
+    const sortedBookings = [...bookings].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const groups = [];
+    let currentGroup = null;
+    
+    sortedBookings.forEach(booking => {
+        const bookingDate = new Date(booking.date);
+        
+        if (!currentGroup) {
+            currentGroup = {
+                dates: [booking.date],
+                location: booking.location,
+                type: booking.type || 'booking',
+                accessories: [...(booking.accessories || [])],
+                dailyAccessories: booking.accessories || [] // Store daily quantities
+            };
+        } else {
+            const lastDate = new Date(currentGroup.dates[currentGroup.dates.length - 1]);
+            const dayDiff = (bookingDate - lastDate) / (1000 * 60 * 60 * 24);
+            
+            // If consecutive dates and same location/type, extend group
+            if (dayDiff <= 1 && currentGroup.location === booking.location && currentGroup.type === booking.type) {
+                currentGroup.dates.push(booking.date);
+                
+                // For display purposes, use the daily accessories from the first booking
+                // This shows what's used per day, not the total across all days
+                if (booking.accessories && currentGroup.dailyAccessories.length === 0) {
+                    currentGroup.dailyAccessories = [...booking.accessories];
+                }
+                
+                // Keep the original accessories structure for compatibility
+                // but use daily quantities for display
+                currentGroup.accessories = [...currentGroup.dailyAccessories];
+            } else {
+                // Close current group and start new one
+                groups.push(currentGroup);
+                currentGroup = {
+                    dates: [booking.date],
+                    location: booking.location,
+                    type: booking.type || 'booking',
+                    accessories: [...(booking.accessories || [])],
+                    dailyAccessories: booking.accessories || []
+                };
+            }
+        }
+    });
+    
+    if (currentGroup) {
+        groups.push(currentGroup);
+    }
+    
+    return groups;
+}
+
+function toggleBookingDetails(bookingId) {
+    const detailsElement = document.getElementById(bookingId);
+    const iconElement = document.getElementById(`${bookingId}-icon`);
+    
+    if (detailsElement.style.display === 'none' || !detailsElement.style.display) {
+        detailsElement.style.display = 'block';
+        iconElement.textContent = '▲';
+    } else {
+        detailsElement.style.display = 'none';
+        iconElement.textContent = '▼';
+    }
+}
+
+function toggleBookingMenu(bookingId) {
+    // Close any other open menus first
+    document.querySelectorAll('.booking-menu').forEach(menu => {
+        if (menu.id !== `${bookingId}-menu`) {
+            menu.style.display = 'none';
+        }
+    });
+    
+    const menuElement = document.getElementById(`${bookingId}-menu`);
+    if (menuElement.style.display === 'none' || !menuElement.style.display) {
+        menuElement.style.display = 'block';
+    } else {
+        menuElement.style.display = 'none';
+    }
+}
+
+function removeAllBookingDates(dateString) {
+    const dates = dateString.split(',');
+    dates.forEach(date => {
+        selectedFilter.bookings = selectedFilter.bookings.filter(b => b.date !== date);
+    });
+    
+    updateFilter(selectedFilter.id, { bookings: selectedFilter.bookings }).then(() => {
+        // Refresh the modal content
+        openFilterModal(selectedFilter.id);
+    });
+}
+
+// Close booking menus when clicking outside
+document.addEventListener('click', function(event) {
+    if (!event.target.closest('.booking-actions-dropdown')) {
+        document.querySelectorAll('.booking-menu').forEach(menu => {
+            menu.style.display = 'none';
+        });
+    }
+});
 
 function removeBooking(date) {
     selectedFilter.bookings = selectedFilter.bookings.filter(b => b.date !== date);
@@ -852,6 +1499,32 @@ function saveAllChanges() {
     const tenMicronCapability = document.getElementById('tenMicronCapability').checked;
     const notes = document.getElementById('notes')?.value || selectedFilter.notes || '';
     const serviceFrequencyDays = parseInt(document.getElementById('serviceFrequency')?.value) || selectedFilter.serviceFrequencyDays || 90;
+    
+    // Validate pending bookings and their accessory allocations
+    if (pendingBookings.length > 0) {
+        const validationErrors = [];
+        
+        pendingBookings.forEach((booking, index) => {
+            if (booking.accessories && booking.accessories.length > 0) {
+                booking.accessories.forEach(accessory => {
+                    if (accessory.quantity <= 0) {
+                        validationErrors.push(`Booking ${index + 1}: Invalid quantity for ${accessory.name}`);
+                    }
+                    
+                    // Find the original accessory to check total quantity
+                    const originalAccessory = accessories.find(acc => acc.id === accessory.id);
+                    if (originalAccessory && accessory.quantity > originalAccessory.quantity) {
+                        validationErrors.push(`Booking ${index + 1}: Requested ${accessory.quantity} of ${accessory.name}, but only ${originalAccessory.quantity} available in total`);
+                    }
+                });
+            }
+        });
+        
+        if (validationErrors.length > 0) {
+            alert('Validation Errors:\n\n' + validationErrors.join('\n\n') + '\n\nPlease fix these issues before saving.');
+            return;
+        }
+    }
     
     // Combine existing bookings with pending bookings
     const existingBookings = selectedFilter.bookings || [];
@@ -891,7 +1564,11 @@ function saveAllChanges() {
     }).then(() => {
         pendingBookings = [];
         currentBookingDates = [];
+        selectedAccessories = [];
         closeModal();
+    }).catch(error => {
+        alert('Error saving changes: ' + error.message);
+        console.error('Save error:', error);
     });
 }
 
@@ -941,6 +1618,11 @@ document.querySelector('.accessory-form-close').addEventListener('click', closeA
 document.getElementById('saveAccessoryBtn').addEventListener('click', saveAccessory);
 document.getElementById('cancelAccessoryBtn').addEventListener('click', closeAccessoryForm);
 
+// Out of service modal event listeners
+document.querySelector('.out-of-service-close').addEventListener('click', closeOutOfServiceModal);
+document.getElementById('confirmOutOfServiceBtn').addEventListener('click', confirmOutOfService);
+document.getElementById('cancelOutOfServiceBtn').addEventListener('click', closeOutOfServiceModal);
+
 function openEmailModal() {
     const emailModal = document.getElementById('emailModal');
     const emailText = document.getElementById('emailText');
@@ -956,185 +1638,201 @@ function closeEmailModal() {
     document.getElementById('emailModal').style.display = 'none';
 }
 
+function getAllFilterBookings(filter) {
+    if (!filter.bookings) return [];
+    
+    return filter.bookings.sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function formatDateDDMMYYYY(date) {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
+
+function getBookingDateRanges(bookings) {
+    if (bookings.length === 0) return 'Available';
+    
+    // Group consecutive dates
+    const ranges = [];
+    let currentRange = null;
+    
+    const sortedBookings = [...bookings].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    sortedBookings.forEach(booking => {
+        const bookingDate = new Date(booking.date);
+        const isService = booking.type === 'service';
+        const location = booking.location;
+        
+        if (!currentRange) {
+            currentRange = {
+                startDate: bookingDate,
+                endDate: bookingDate,
+                location: location,
+                isService: isService,
+                count: 1,
+                accessories: booking.accessories || [],
+                dailyAccessories: booking.accessories || [] // Store daily quantities for display
+            };
+        } else {
+            const dayDiff = (bookingDate - currentRange.endDate) / (1000 * 60 * 60 * 24);
+            
+            // If consecutive dates and same location/type, extend range
+            if (dayDiff <= 1 && currentRange.location === location && currentRange.isService === isService) {
+                currentRange.endDate = bookingDate;
+                currentRange.count++;
+                
+                // Keep daily accessories from first booking for display
+                // Don't add up quantities across days for display purposes
+                if (booking.accessories && currentRange.dailyAccessories.length === 0) {
+                    currentRange.dailyAccessories = [...booking.accessories];
+                }
+                currentRange.accessories = [...currentRange.dailyAccessories];
+            } else {
+                // Close current range and start new one
+                ranges.push(currentRange);
+                currentRange = {
+                    startDate: bookingDate,
+                    endDate: bookingDate,
+                    location: location,
+                    isService: isService,
+                    count: 1,
+                    accessories: booking.accessories || [],
+                    dailyAccessories: booking.accessories || []
+                };
+            }
+        }
+    });
+    
+    if (currentRange) {
+        ranges.push(currentRange);
+    }
+    
+    // Format ranges
+    return ranges.map(range => {
+        let dateStr;
+        if (range.count === 1) {
+            dateStr = formatDateDDMMYYYY(range.startDate);
+        } else {
+            dateStr = `${formatDateDDMMYYYY(range.startDate)}-${formatDateDDMMYYYY(range.endDate)}`;
+        }
+        
+        const serviceText = range.isService ? ' (Service)' : '';
+        let result = `${dateStr} ${range.location}${serviceText}`;
+        
+        // Add accessories if any
+        if (range.accessories && range.accessories.length > 0) {
+            const accessoryList = range.accessories.map(acc => {
+                let quantityText = `${acc.quantity}${acc.unit ? ` ${acc.unit}` : ''}`;
+                // Add "per day" for multi-day bookings
+                if (range.count > 1) {
+                    quantityText += ' per day';
+                }
+                return `${acc.name} (${quantityText})`;
+            }).join(', ');
+            result += ` - Accessories: ${accessoryList}`;
+        }
+        
+        return result;
+    }).join(', ');
+}
+
 function generateWeeklyReport() {
     const today = new Date();
     const weekFromToday = new Date(today);
     weekFromToday.setDate(today.getDate() + 7);
     
-    const subject = `Weekly Filter Status Report - ${today.toLocaleDateString()}`;
+    const subject = `Weekly Filter Status Report - ${formatDateDDMMYYYY(today)}`;
     
     let emailBody = `Subject: ${subject}\n\n`;
     emailBody += `WEEKLY FILTER STATUS REPORT\n`;
-    emailBody += `Generated on: ${today.toLocaleDateString()} at ${today.toLocaleTimeString()}\n`;
-    emailBody += `Report Period: ${today.toLocaleDateString()} - ${weekFromToday.toLocaleDateString()}\n`;
+    emailBody += `Generated: ${formatDateDDMMYYYY(today)} at ${today.toLocaleTimeString()}\n`;
+    emailBody += `Report Period: ${formatDateDDMMYYYY(today)} - ${formatDateDDMMYYYY(weekFromToday)}\n`;
     emailBody += `${'='.repeat(60)}\n\n`;
     
+    // Filter status overview
     filters.forEach((filter, index) => {
-        emailBody += `FILTER ${filter.id}: ${filter.name}\n`;
-        emailBody += `${'-'.repeat(30)}\n`;
+        emailBody += `FILTER ${filter.id}: ${filter.name} (${filter.location})\n`;
         
-        // Location
-        emailBody += `📍 Location: ${filter.location}\n`;
-        
-        // Capabilities
+        // Capabilities - one line
         const capability = getFilterCapability(filter);
-        emailBody += `🔧 Filtration Capability: ${capability}\n`;
-        emailBody += `   • UV Capability: ${filter.uvCapability ? '✅ Yes' : '❌ No'}\n`;
-        emailBody += `   • 10 Micron Capability: ${filter.tenMicronCapability ? '✅ Yes' : '❌ No'}\n`;
+        const uvStatus = filter.uvCapability ? 'UV' : 'No UV';
+        const micronStatus = filter.tenMicronCapability ? '10μ' : '25μ';
+        emailBody += `Capability: ${capability} (${uvStatus}, ${micronStatus})\n`;
         
-        // Service Status
+        // Service status - concise
         const serviceStatus = getServiceStatus(filter);
         if (filter.lastServiceDate) {
-            emailBody += `🛠️ Service Information:\n`;
-            emailBody += `   • Last Service: ${new Date(filter.lastServiceDate).toLocaleDateString()}\n`;
-            emailBody += `   • Service Frequency: Every ${filter.serviceFrequencyDays || 90} days\n`;
-            if (serviceStatus.nextServiceDate) {
-                emailBody += `   • Next Service Due: ${new Date(serviceStatus.nextServiceDate).toLocaleDateString()}`;
-                if (serviceStatus.isDue) {
-                    emailBody += ` ⚠️ OVERDUE`;
-                }
-                emailBody += `\n`;
-            }
+            const nextServiceText = serviceStatus.nextServiceDate ? 
+                formatDateDDMMYYYY(new Date(serviceStatus.nextServiceDate)) : 'Not scheduled';
+            const overdueText = serviceStatus.isDue ? ' (OVERDUE)' : '';
+            emailBody += `Service: Last ${formatDateDDMMYYYY(new Date(filter.lastServiceDate))}, Next ${nextServiceText}${overdueText}\n`;
         } else {
-            emailBody += `🛠️ Service Information: No service history recorded\n`;
+            emailBody += `Service: No history\n`;
         }
         
-        // Bookings for the next week
-        const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
-        if (nextWeekBookings.length > 0) {
-            emailBody += `📅 Bookings for Next 7 Days:\n`;
-            nextWeekBookings.forEach(booking => {
-                const bookingDate = new Date(booking.date).toLocaleDateString();
-                const isService = booking.type === 'service';
-                emailBody += `   • ${bookingDate}: ${booking.location}${isService ? ' (Service)' : ''}\n`;
-                
-                // Add accessory information for this booking
-                if (booking.accessories && booking.accessories.length > 0) {
-                    emailBody += `     📦 Accessories: `;
-                    const accessoryList = booking.accessories.map(acc => 
-                        `${acc.name} (${acc.quantity} ${acc.unit})`
-                    ).join(', ');
-                    emailBody += `${accessoryList}\n`;
-                }
-            });
+        // Bookings - show date ranges with accessories
+        const allFilterBookings = getAllFilterBookings(filter);
+        
+        if (allFilterBookings.length > 0) {
+            const bookingRanges = getBookingDateRanges(allFilterBookings);
+            emailBody += `Bookings: ${bookingRanges}\n`;
         } else {
-            emailBody += `📅 Bookings for Next 7 Days: None scheduled ✅\n`;
+            emailBody += `Bookings: Available\n`;
         }
         
-        // Overall accessory allocation for this filter during the week
-        const weeklyAccessoryAllocations = getWeeklyAccessoryAllocations(filter, today, weekFromToday);
-        if (weeklyAccessoryAllocations.length > 0) {
-            emailBody += `🔧 Weekly Accessory Allocations:\n`;
-            weeklyAccessoryAllocations.forEach(allocation => {
-                emailBody += `   • ${allocation.name}: ${allocation.totalQuantity} ${allocation.unit} (${allocation.days} days)\n`;
-            });
-        }
-        
-        // Notes
+        // Notes - only if present
         if (filter.notes && filter.notes.trim()) {
-            emailBody += `📝 Notes: ${filter.notes.trim()}\n`;
+            emailBody += `Notes: ${filter.notes.trim()}\n`;
         }
         
-        // Overall Status
-        const isAvailable = nextWeekBookings.length === 0;
-        emailBody += `📊 Status: ${isAvailable ? '✅ Available' : '🔴 Scheduled'}\n`;
-        
-        if (index < filters.length - 1) {
-            emailBody += `\n`;
-        }
+        emailBody += `\n`;
     });
     
-    // Summary
-    emailBody += `\n${'='.repeat(60)}\n`;
-    emailBody += `SUMMARY\n`;
-    emailBody += `${'-'.repeat(30)}\n`;
-    
+    // Summary section
     const availableFilters = filters.filter(filter => {
         const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
         return nextWeekBookings.length === 0;
     });
     
-    const bookedFilters = filters.filter(filter => {
-        const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
-        return nextWeekBookings.length > 0;
-    });
-    
     const servicesDue = filters.filter(filter => getServiceStatus(filter).isDue);
     
-    emailBody += `📊 Total Filters: ${filters.length}\n`;
-    emailBody += `✅ Available for Next Week: ${availableFilters.length}\n`;
-    emailBody += `🔴 Scheduled for Next Week: ${bookedFilters.length}\n`;
-    emailBody += `⚠️ Services Due: ${servicesDue.length}\n`;
+    emailBody += `SUMMARY\n`;
+    emailBody += `Available Next Week: ${availableFilters.map(f => f.name).join(', ') || 'None'}\n`;
+    emailBody += `Scheduled Next Week: ${filters.filter(f => !availableFilters.includes(f)).map(f => f.name).join(', ') || 'None'}\n`;
     
     if (servicesDue.length > 0) {
-        emailBody += `\n🛠️ Filters Requiring Service:\n`;
-        servicesDue.forEach(filter => {
-            emailBody += `   • ${filter.name} (${filter.location})\n`;
-        });
+        emailBody += `Services Due: ${servicesDue.map(f => f.name).join(', ')}\n`;
     }
     
-    // Accessory Summary
-    const accessorySummary = generateAccessorySummary(today, weekFromToday);
-    
-    emailBody += `\n${'='.repeat(60)}\n`;
-    emailBody += `ACCESSORY STATUS SUMMARY\n`;
-    emailBody += `${'-'.repeat(30)}\n`;
-    
-    // High utilization accessories (>50% allocated)
-    const highUtilization = accessorySummary.availability.filter(acc => acc.percentUsed >= 50);
-    if (highUtilization.length > 0) {
-        emailBody += `⚠️ HIGH UTILIZATION ACCESSORIES (50%+ allocated):\n`;
-        highUtilization.forEach(acc => {
-            const status = acc.available <= 0 ? '🔴 FULLY ALLOCATED' : 
-                          acc.available <= 1 ? '🟡 LIMITED' : '🟢 AVAILABLE';
-            emailBody += `   • ${acc.name} (${acc.pool}): ${acc.allocated}/${acc.total} ${acc.unit} used (${acc.percentUsed}%) ${status}\n`;
-        });
-        emailBody += `\n`;
-    }
-    
-    // Pool status
-    const nswPoolItems = accessorySummary.availability.filter(acc => acc.pool === 'NSW');
-    const waPoolItems = accessorySummary.availability.filter(acc => acc.pool === 'WA');
-    
-    const nswAllocated = nswPoolItems.filter(acc => acc.allocated > 0).length;
-    const waAllocated = waPoolItems.filter(acc => acc.allocated > 0).length;
-    
-    emailBody += `📦 POOL STATUS:\n`;
-    emailBody += `   🏢 NSW Pool (Filter 4): ${nswAllocated}/${nswPoolItems.length} accessories in use\n`;
-    emailBody += `   🏢 WA Pool (Filters 1,2,3): ${waAllocated}/${waPoolItems.length} accessories in use\n`;
-    
-    // Most used accessories this week
-    if (accessorySummary.usage.length > 0) {
-        const topUsed = accessorySummary.usage
-            .sort((a, b) => b.totalAllocated - a.totalAllocated)
-            .slice(0, 5);
+    // Out of Service Accessories Section
+    emailBody += `\nOUT OF SERVICE ACCESSORIES\n`;
+    const outOfServiceAccessories = accessories.filter(acc => {
+        if (!acc.outOfService || !acc.outOfService.isOutOfService) return false;
         
-        emailBody += `\n📈 MOST ALLOCATED ACCESSORIES THIS WEEK:\n`;
-        topUsed.forEach((usage, index) => {
-            const filtersArray = Array.from(usage.filtersUsing);
-            emailBody += `   ${index + 1}. ${usage.name}: ${usage.totalAllocated} ${usage.unit} (${filtersArray.join(', ')})\n`;
-        });
-    }
-    
-    // Fully available accessories
-    const fullyAvailable = accessorySummary.availability.filter(acc => acc.allocated === 0);
-    if (fullyAvailable.length > 0) {
-        emailBody += `\n✅ FULLY AVAILABLE ACCESSORIES (${fullyAvailable.length} items):\n`;
-        const nswAvailable = fullyAvailable.filter(acc => acc.pool === 'NSW');
-        const waAvailable = fullyAvailable.filter(acc => acc.pool === 'WA');
+        const serviceStart = new Date(acc.outOfService.startDate);
+        const serviceEnd = new Date(acc.outOfService.endDate);
+        const weekEnd = new Date(weekFromToday);
         
-        if (nswAvailable.length > 0) {
-            emailBody += `   NSW Pool: ${nswAvailable.map(acc => acc.name).join(', ')}\n`;
-        }
-        if (waAvailable.length > 0) {
-            emailBody += `   WA Pool: ${waAvailable.map(acc => acc.name).join(', ')}\n`;
-        }
+        // Include if currently out of service or will be out of service within the week
+        return serviceEnd >= today && serviceStart <= weekEnd;
+    });
+    
+    if (outOfServiceAccessories.length > 0) {
+        outOfServiceAccessories.forEach(accessory => {
+            const startDate = formatDateDDMMYYYY(new Date(accessory.outOfService.startDate));
+            const endDate = formatDateDDMMYYYY(new Date(accessory.outOfService.endDate));
+            const reason = accessory.outOfService.reason ? ` (${accessory.outOfService.reason})` : '';
+            
+            emailBody += `${accessory.name} (${accessory.pool}): ${startDate} - ${endDate}${reason}\n`;
+        });
+    } else {
+        emailBody += `All accessories operational\n`;
     }
     
     emailBody += `\n${'='.repeat(60)}\n`;
-    emailBody += `This report was automatically generated by the Filter Status Tracker system.\n`;
-    emailBody += `Includes comprehensive filter booking and accessory allocation tracking.\n`;
-    emailBody += `For updates or changes, please access the system directly.\n`;
+    emailBody += `Auto-generated by Filter Status Tracker\n`;
     
     return emailBody;
 }
@@ -1279,6 +1977,7 @@ window.addEventListener('click', function(event) {
     const emailModal = document.getElementById('emailModal');
     const accessoryModal = document.getElementById('accessoryModal');
     const accessoryFormModal = document.getElementById('accessoryFormModal');
+    const outOfServiceModal = document.getElementById('outOfServiceModal');
     
     if (event.target === modal) {
         closeModal();
@@ -1295,6 +1994,10 @@ window.addEventListener('click', function(event) {
     if (event.target === accessoryFormModal) {
         closeAccessoryForm();
     }
+    
+    if (event.target === outOfServiceModal) {
+        closeOutOfServiceModal();
+    }
 });
 
 // Track activity
@@ -1305,3 +2008,453 @@ document.addEventListener('mousemove', resetInactivityTimer);
 // Initialize
 fetchFilters();
 fetchAccessories();
+
+// Enhanced booking management functions
+function confirmCancelEntireBooking(dateString, location) {
+    const dates = dateString.split(',');
+    const dateDisplay = dates.length === 1 
+        ? new Date(dates[0]).toLocaleDateString()
+        : `${new Date(dates[0]).toLocaleDateString()} - ${new Date(dates[dates.length - 1]).toLocaleDateString()}`;
+    
+    const message = `Are you sure you want to cancel the entire booking?\n\n` +
+                   `Location: ${location}\n` +
+                   `Dates: ${dateDisplay}\n` +
+                   `Days: ${dates.length}\n\n` +
+                   `This will free up all accessories for these dates.`;
+    
+    if (confirm(message)) {
+        cancelEntireBooking(dates);
+    }
+}
+
+function confirmRemoveBooking(date) {
+    const dateDisplay = new Date(date).toLocaleDateString();
+    const booking = selectedFilter.bookings.find(b => b.date === date);
+    const hasAccessories = booking && booking.accessories && booking.accessories.length > 0;
+    
+    let message = `Remove booking for ${dateDisplay}?`;
+    if (hasAccessories) {
+        message += `\n\nThis will also free up ${booking.accessories.length} accessories for this date.`;
+    }
+    
+    if (confirm(message)) {
+        removeBooking(date);
+    }
+}
+
+function cancelEntireBooking(dates) {
+    const removedCount = dates.length;
+    let removedAccessories = 0;
+    
+    // Count accessories that will be freed
+    dates.forEach(date => {
+        const booking = selectedFilter.bookings.find(b => b.date === date);
+        if (booking && booking.accessories) {
+            removedAccessories += booking.accessories.length;
+        }
+    });
+    
+    // Remove all bookings for these dates
+    dates.forEach(date => {
+        selectedFilter.bookings = selectedFilter.bookings.filter(b => b.date !== date);
+    });
+    
+    updateFilter(selectedFilter.id, { bookings: selectedFilter.bookings }).then(() => {
+        // Show success message
+        const message = `Successfully cancelled booking!\n\n` +
+                       `Removed: ${removedCount} day${removedCount !== 1 ? 's' : ''}\n` +
+                       `Freed accessories: ${removedAccessories}`;
+        alert(message);
+        
+        // Refresh the modal content
+        openFilterModal(selectedFilter.id);
+    }).catch(error => {
+        alert('Error cancelling booking: ' + error.message);
+    });
+}
+
+function editBookingLocation(dateString, currentLocation) {
+    const dates = dateString.split(',');
+    const dateDisplay = dates.length === 1 
+        ? new Date(dates[0]).toLocaleDateString()
+        : `${new Date(dates[0]).toLocaleDateString()} - ${new Date(dates[dates.length - 1]).toLocaleDateString()}`;
+    
+    const newLocation = prompt(`Edit location for booking:\n${dateDisplay}\n\nCurrent location:`, currentLocation);
+    
+    if (newLocation !== null && newLocation.trim() !== '' && newLocation.trim() !== currentLocation) {
+        // Update all bookings for these dates
+        dates.forEach(date => {
+            const booking = selectedFilter.bookings.find(b => b.date === date);
+            if (booking) {
+                booking.location = newLocation.trim();
+            }
+        });
+        
+        updateFilter(selectedFilter.id, { bookings: selectedFilter.bookings }).then(() => {
+            alert(`Location updated to: ${newLocation.trim()}`);
+            openFilterModal(selectedFilter.id);
+        }).catch(error => {
+            alert('Error updating location: ' + error.message);
+        });
+    }
+}
+
+function editBookingAccessories(dateString, bookingId) {
+    const dates = dateString.split(',');
+    const dateDisplay = dates.length === 1 
+        ? new Date(dates[0]).toLocaleDateString()
+        : `${new Date(dates[0]).toLocaleDateString()} - ${new Date(dates[dates.length - 1]).toLocaleDateString()}`;
+    
+    // Get current accessories for this booking group
+    const currentAccessories = [];
+    const firstBooking = selectedFilter.bookings.find(b => b.date === dates[0]);
+    if (firstBooking && firstBooking.accessories) {
+        currentAccessories.push(...firstBooking.accessories);
+    }
+    
+    openAccessoryEditModal(dates, dateDisplay, currentAccessories, bookingId);
+}
+
+function removeAccessoryFromBooking(dateString, accessoryIdentifier) {
+    const dates = dateString.split(',');
+    const accessoryName = typeof accessoryIdentifier === 'string' ? accessoryIdentifier : 
+                         accessories.find(acc => acc.id === accessoryIdentifier)?.name || 'Unknown';
+    
+    const message = `Remove "${accessoryName}" from this booking?\n\n` +
+                   `This will free up the accessory for these dates:\n` +
+                   `${dates.map(date => new Date(date).toLocaleDateString()).join(', ')}`;
+    
+    if (confirm(message)) {
+        // Remove accessory from all bookings in this date range
+        dates.forEach(date => {
+            const booking = selectedFilter.bookings.find(b => b.date === date);
+            if (booking && booking.accessories) {
+                booking.accessories = booking.accessories.filter(acc => {
+                    if (typeof accessoryIdentifier === 'string') {
+                        return acc.name !== accessoryIdentifier;
+                    } else {
+                        return acc.id !== accessoryIdentifier;
+                    }
+                });
+            }
+        });
+        
+        updateFilter(selectedFilter.id, { bookings: selectedFilter.bookings }).then(() => {
+            alert(`"${accessoryName}" removed from booking`);
+            openFilterModal(selectedFilter.id);
+        }).catch(error => {
+            alert('Error removing accessory: ' + error.message);
+        });
+    }
+}
+
+function openAccessoryEditModal(dates, dateDisplay, currentAccessories, bookingId) {
+    // Create modal HTML
+    const modalHTML = `
+        <div id="accessoryEditModal" class="modal">
+            <div class="modal-content">
+                <span class="close accessory-edit-close">&times;</span>
+                <h2>Edit Accessories</h2>
+                <div class="accessory-edit-content">
+                    <div class="booking-info">
+                        <p><strong>Booking Dates:</strong> ${dateDisplay}</p>
+                        <p><strong>Filter:</strong> ${selectedFilter.name}</p>
+                    </div>
+                    
+                    <div class="current-accessories">
+                        <h3>Current Accessories</h3>
+                        <div id="currentAccessoriesList" class="current-accessories-list">
+                            ${currentAccessories.length > 0 ? 
+                                currentAccessories.map((acc, index) => `
+                                    <div class="current-accessory-item" data-index="${index}">
+                                        <span class="acc-name">${acc.name}</span>
+                                        <div class="quantity-controls">
+                                            <button class="quantity-btn" onclick="changeAccessoryQuantity(${index}, -1)">-</button>
+                                            <input type="number" class="quantity-input" value="${acc.quantity}" min="0" 
+                                                   onchange="updateAccessoryQuantity(${index}, this.value)"
+                                                   data-accessory-id="${acc.id}">
+                                            <button class="quantity-btn" onclick="changeAccessoryQuantity(${index}, 1)">+</button>
+                                            <span class="acc-unit">${acc.unit || ''}</span>
+                                        </div>
+                                        <button class="remove-current-accessory" onclick="removeCurrentAccessory(${index})" title="Remove accessory">
+                                            🗑️
+                                        </button>
+                                    </div>
+                                `).join('') :
+                                '<p class="no-accessories">No accessories currently assigned</p>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <div class="add-accessories">
+                        <h3>Add More Accessories</h3>
+                        <div id="availableAccessoriesForEdit" class="available-accessories-edit">
+                            <!-- Will be populated by renderAvailableAccessoriesForEdit -->
+                        </div>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button class="btn-primary" onclick="saveAccessoryChanges('${dates.join(',')}', '${bookingId}')">Save Changes</button>
+                        <button class="btn-secondary" onclick="closeAccessoryEditModal()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('accessoryEditModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Show modal
+    document.getElementById('accessoryEditModal').style.display = 'block';
+    
+    // Set up close handlers
+    document.querySelector('.accessory-edit-close').addEventListener('click', closeAccessoryEditModal);
+    window.addEventListener('click', function(event) {
+        const modal = document.getElementById('accessoryEditModal');
+        if (event.target === modal) {
+            closeAccessoryEditModal();
+        }
+    });
+    
+    // Store current state for editing
+    window.editingAccessories = [...currentAccessories];
+    window.editingDates = dates;
+    
+    // Load available accessories for adding
+    renderAvailableAccessoriesForEdit(dates);
+}
+
+async function renderAvailableAccessoriesForEdit(dates) {
+    const startDate = dates[0];
+    const endDate = dates[dates.length - 1];
+    
+    try {
+        const availableAccessories = await fetchAvailableAccessories(selectedFilter.id, startDate, endDate);
+        const container = document.getElementById('availableAccessoriesForEdit');
+        
+        container.innerHTML = availableAccessories.map(accessory => {
+            const availableQty = Math.max(0, accessory.availableQuantity);
+            const isDisabled = availableQty === 0 || (accessory.isOutOfServiceDuringPeriod || false);
+            
+            // Check if already in current selection
+            const alreadySelected = window.editingAccessories.find(acc => acc.id === accessory.id);
+            if (alreadySelected) {
+                return ''; // Don't show accessories already selected
+            }
+            
+            return `
+                <div class="available-accessory-edit ${isDisabled ? 'disabled' : ''}" data-accessory-id="${accessory.id}">
+                    <div class="accessory-info">
+                        <div class="accessory-name">${accessory.name}</div>
+                        <div class="accessory-available">Available: ${availableQty}/${accessory.quantity}</div>
+                    </div>
+                    <div class="add-accessory-controls">
+                        <input type="number" class="add-quantity" min="0" max="${availableQty}" value="0" 
+                               ${isDisabled ? 'disabled' : ''} 
+                               id="add-qty-${accessory.id}">
+                        <button class="btn-add-accessory" onclick="addAccessoryToEdit(${accessory.id})"
+                                ${isDisabled ? 'disabled' : ''}>
+                            Add
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).filter(html => html !== '').join('');
+        
+        if (container.innerHTML === '') {
+            container.innerHTML = '<p class="no-available">No additional accessories available for these dates</p>';
+        }
+    } catch (error) {
+        console.error('Error loading available accessories:', error);
+        document.getElementById('availableAccessoriesForEdit').innerHTML = 
+            '<p class="error">Error loading available accessories</p>';
+    }
+}
+
+// Accessory editing modal helper functions
+function changeAccessoryQuantity(index, change) {
+    const quantityInput = document.querySelector(`[data-index="${index}"] .quantity-input`);
+    const currentQty = parseInt(quantityInput.value) || 0;
+    const newQty = Math.max(0, currentQty + change);
+    
+    // Check max available (need to validate against original accessory limits)
+    const accessoryId = quantityInput.dataset.accessoryId;
+    const originalAccessory = accessories.find(acc => acc.id == accessoryId);
+    if (originalAccessory && newQty > originalAccessory.quantity) {
+        alert(`Cannot exceed total available quantity of ${originalAccessory.quantity}`);
+        return;
+    }
+    
+    quantityInput.value = newQty;
+    updateAccessoryQuantity(index, newQty);
+}
+
+function updateAccessoryQuantity(index, newValue) {
+    const quantity = Math.max(0, parseInt(newValue) || 0);
+    
+    if (window.editingAccessories && window.editingAccessories[index]) {
+        window.editingAccessories[index].quantity = quantity;
+        
+        // Update the input field to ensure consistency
+        const quantityInput = document.querySelector(`[data-index="${index}"] .quantity-input`);
+        if (quantityInput) {
+            quantityInput.value = quantity;
+        }
+        
+        // If quantity is 0, could auto-remove, but let's keep it visible with 0
+        if (quantity === 0) {
+            const item = document.querySelector(`[data-index="${index}"]`);
+            if (item) {
+                item.classList.add('zero-quantity');
+            }
+        } else {
+            const item = document.querySelector(`[data-index="${index}"]`);
+            if (item) {
+                item.classList.remove('zero-quantity');
+            }
+        }
+    }
+}
+
+function removeCurrentAccessory(index) {
+    if (window.editingAccessories && window.editingAccessories[index]) {
+        const accessoryName = window.editingAccessories[index].name;
+        
+        if (confirm(`Remove "${accessoryName}" from this booking?`)) {
+            // Remove from editing array
+            window.editingAccessories.splice(index, 1);
+            
+            // Re-render the current accessories list
+            renderCurrentAccessoriesList();
+            
+            // Re-render available accessories (since this one is now available again)
+            renderAvailableAccessoriesForEdit(window.editingDates);
+        }
+    }
+}
+
+function addAccessoryToEdit(accessoryId) {
+    const quantityInput = document.getElementById(`add-qty-${accessoryId}`);
+    const quantity = parseInt(quantityInput.value) || 0;
+    
+    if (quantity <= 0) {
+        alert('Please enter a quantity greater than 0');
+        return;
+    }
+    
+    const originalAccessory = accessories.find(acc => acc.id === accessoryId);
+    if (!originalAccessory) {
+        alert('Accessory not found');
+        return;
+    }
+    
+    // Add to editing accessories
+    if (!window.editingAccessories) {
+        window.editingAccessories = [];
+    }
+    
+    window.editingAccessories.push({
+        id: accessoryId,
+        name: originalAccessory.name,
+        quantity: quantity,
+        unit: originalAccessory.unit || ''
+    });
+    
+    // Re-render both lists
+    renderCurrentAccessoriesList();
+    renderAvailableAccessoriesForEdit(window.editingDates);
+}
+
+function renderCurrentAccessoriesList() {
+    const container = document.getElementById('currentAccessoriesList');
+    if (!container || !window.editingAccessories) return;
+    
+    if (window.editingAccessories.length === 0) {
+        container.innerHTML = '<p class="no-accessories">No accessories currently assigned</p>';
+        return;
+    }
+    
+    container.innerHTML = window.editingAccessories.map((acc, index) => `
+        <div class="current-accessory-item ${acc.quantity === 0 ? 'zero-quantity' : ''}" data-index="${index}">
+            <span class="acc-name">${acc.name}</span>
+            <div class="quantity-controls">
+                <button class="quantity-btn" onclick="changeAccessoryQuantity(${index}, -1)">-</button>
+                <input type="number" class="quantity-input" value="${acc.quantity}" min="0" 
+                       onchange="updateAccessoryQuantity(${index}, this.value)"
+                       data-accessory-id="${acc.id}">
+                <button class="quantity-btn" onclick="changeAccessoryQuantity(${index}, 1)">+</button>
+                <span class="acc-unit">${acc.unit || ''}</span>
+            </div>
+            <button class="remove-current-accessory" onclick="removeCurrentAccessory(${index})" title="Remove accessory">
+                🗑️
+            </button>
+        </div>
+    `).join('');
+}
+
+function saveAccessoryChanges(dateString, bookingId) {
+    const dates = dateString.split(',');
+    
+    if (!window.editingAccessories) {
+        alert('No changes to save');
+        return;
+    }
+    
+    // Filter out zero-quantity accessories
+    const validAccessories = window.editingAccessories.filter(acc => acc.quantity > 0);
+    
+    // Validate quantities don't exceed available inventory
+    const validationErrors = [];
+    validAccessories.forEach(acc => {
+        const originalAccessory = accessories.find(orig => orig.id === acc.id);
+        if (originalAccessory && acc.quantity > originalAccessory.quantity) {
+            validationErrors.push(`${acc.name}: Requested ${acc.quantity}, but only ${originalAccessory.quantity} available in total`);
+        }
+    });
+    
+    if (validationErrors.length > 0) {
+        alert('Validation Errors:\n\n' + validationErrors.join('\n'));
+        return;
+    }
+    
+    // Update all bookings for these dates
+    dates.forEach(date => {
+        const booking = selectedFilter.bookings.find(b => b.date === date);
+        if (booking) {
+            booking.accessories = [...validAccessories];
+        }
+    });
+    
+    // Save to server
+    updateFilter(selectedFilter.id, { bookings: selectedFilter.bookings }).then(() => {
+        const accessoryCount = validAccessories.length;
+        alert(`Successfully updated accessories!\n\nAssigned ${accessoryCount} accessory type${accessoryCount !== 1 ? 's' : ''} to this booking.`);
+        
+        closeAccessoryEditModal();
+        openFilterModal(selectedFilter.id);
+    }).catch(error => {
+        alert('Error saving changes: ' + error.message);
+    });
+}
+
+function closeAccessoryEditModal() {
+    const modal = document.getElementById('accessoryEditModal');
+    if (modal) {
+        modal.remove();
+    }
+    
+    // Clean up global variables
+    if (window.editingAccessories) {
+        delete window.editingAccessories;
+    }
+    if (window.editingDates) {
+        delete window.editingDates;
+    }
+}
