@@ -1751,9 +1751,34 @@ function generateWeeklyReport() {
     emailBody += `Report Period: ${formatDateDDMMYYYY(today)} - ${formatDateDDMMYYYY(weekFromToday)}\n`;
     emailBody += `${'='.repeat(60)}\n\n`;
     
+    // Summary section (moved to top)
+    const availableFilters = filters.filter(filter => {
+        const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
+        return nextWeekBookings.length === 0;
+    });
+    
+    const servicesDue = filters.filter(filter => getServiceStatus(filter).isDue);
+    
+    // Helper function to add location suffix to filter names
+    const getFilterNameWithLocation = (filter) => {
+        const locationSuffix = filter.id <= 3 ? ' (WA)' : ' (NSW)';
+        return filter.name + locationSuffix;
+    };
+    
+    emailBody += `SUMMARY\n`;
+    emailBody += `Available Next Week: ${availableFilters.map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
+    emailBody += `Scheduled Next Week: ${filters.filter(f => !availableFilters.includes(f)).map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
+    
+    if (servicesDue.length > 0) {
+        emailBody += `Services Due: ${servicesDue.map(f => getFilterNameWithLocation(f)).join(', ')}\n`;
+    }
+    
+    emailBody += `\n`;
+    
     // Filter status overview
     filters.forEach((filter, index) => {
-        emailBody += `FILTER ${filter.id}: ${filter.name} (${filter.location})\n`;
+        const filterNameWithLocation = getFilterNameWithLocation(filter);
+        emailBody += `FILTER ${filter.id}: ${filterNameWithLocation} (${filter.location})\n`;
         
         // Capabilities - one line
         const capability = getFilterCapability(filter);
@@ -1790,24 +1815,8 @@ function generateWeeklyReport() {
         emailBody += `\n`;
     });
     
-    // Summary section
-    const availableFilters = filters.filter(filter => {
-        const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
-        return nextWeekBookings.length === 0;
-    });
-    
-    const servicesDue = filters.filter(filter => getServiceStatus(filter).isDue);
-    
-    emailBody += `SUMMARY\n`;
-    emailBody += `Available Next Week: ${availableFilters.map(f => f.name).join(', ') || 'None'}\n`;
-    emailBody += `Scheduled Next Week: ${filters.filter(f => !availableFilters.includes(f)).map(f => f.name).join(', ') || 'None'}\n`;
-    
-    if (servicesDue.length > 0) {
-        emailBody += `Services Due: ${servicesDue.map(f => f.name).join(', ')}\n`;
-    }
-    
     // Out of Service Accessories Section
-    emailBody += `\nOUT OF SERVICE ACCESSORIES\n`;
+    emailBody += `OUT OF SERVICE ACCESSORIES\n`;
     const outOfServiceAccessories = accessories.filter(acc => {
         if (!acc.outOfService || !acc.outOfService.isOutOfService) return false;
         
