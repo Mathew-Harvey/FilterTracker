@@ -1586,23 +1586,27 @@ document.getElementById('lockBtn').addEventListener('click', function() {
     
     const lockIcon = this.querySelector('.lock-icon');
     const lockText = this.querySelector('.lock-text');
-    const emailBtn = document.getElementById('emailBtn');
+    const waEmailBtn = document.getElementById('waEmailBtn');
+    const nswEmailBtn = document.getElementById('nswEmailBtn');
     
     if (isUnlocked) {
         lockIcon.textContent = '🔓';
         lockText.textContent = 'Unlocked';
-        emailBtn.style.display = 'none';
+        waEmailBtn.style.display = 'none';
+        nswEmailBtn.style.display = 'none';
         resetInactivityTimer();
     } else {
         lockIcon.textContent = '🔒';
         lockText.textContent = 'Locked';
-        emailBtn.style.display = 'flex';
+        waEmailBtn.style.display = 'flex';
+        nswEmailBtn.style.display = 'flex';
         clearTimeout(inactivityTimer);
     }
 });
 
 // Email functionality
-document.getElementById('emailBtn').addEventListener('click', openEmailModal);
+document.getElementById('waEmailBtn').addEventListener('click', () => openEmailModal('WA'));
+document.getElementById('nswEmailBtn').addEventListener('click', () => openEmailModal('NSW'));
 document.querySelector('.email-close').addEventListener('click', closeEmailModal);
 document.getElementById('closeEmailBtn').addEventListener('click', closeEmailModal);
 document.getElementById('copyEmailBtn').addEventListener('click', copyEmailToClipboard);
@@ -1623,12 +1627,22 @@ document.querySelector('.out-of-service-close').addEventListener('click', closeO
 document.getElementById('confirmOutOfServiceBtn').addEventListener('click', confirmOutOfService);
 document.getElementById('cancelOutOfServiceBtn').addEventListener('click', closeOutOfServiceModal);
 
-function openEmailModal() {
+function openEmailModal(pool) {
+    // Validate pool parameter
+    if (!pool || !['WA', 'NSW'].includes(pool)) {
+        console.error('Invalid pool parameter:', pool);
+        pool = 'WA'; // Default fallback
+    }
+    
     const emailModal = document.getElementById('emailModal');
     const emailText = document.getElementById('emailText');
+    const modalTitle = emailModal.querySelector('h2');
+    
+    // Update modal title to show which pool
+    modalTitle.textContent = `Weekly Filter Status Report - ${pool} Pool`;
     
     // Generate email content
-    const emailContent = generateWeeklyReport();
+    const emailContent = generateWeeklyReport(pool);
     emailText.value = emailContent;
     
     emailModal.style.display = 'block';
@@ -1738,26 +1752,53 @@ function getBookingDateRanges(bookings) {
     }).join(', ');
 }
 
-function generateWeeklyReport() {
+function generateWeeklyReport(pool) {
     const today = new Date();
     const weekFromToday = new Date(today);
     weekFromToday.setDate(today.getDate() + 7);
     
-    const subject = `Weekly Filter Status Report - ${formatDateDDMMYYYY(today)}`;
+    // Validate inputs
+    if (!pool || !['WA', 'NSW'].includes(pool)) {
+        console.error('Invalid pool parameter:', pool);
+        pool = 'WA'; // Default fallback
+    }
+    
+    if (!filters || filters.length === 0) {
+        return `Subject: Weekly Filter Status Report - ${pool} Pool - ${formatDateDDMMYYYY(today)}\n\nNo filters available in the system.`;
+    }
+    
+    // Filter filters by pool
+    const poolFilters = filters.filter(filter => {
+        if (pool === 'WA') {
+            return filter.id <= 3; // Filters 1, 2, 3 are WA pool
+        } else if (pool === 'NSW') {
+            return filter.id > 3; // Filter 4 is NSW pool
+        }
+        return true; // fallback to all filters
+    });
+    
+    // Handle case where no filters exist for this pool
+    if (poolFilters.length === 0) {
+        const subject = `Weekly Filter Status Report - ${pool} Pool - ${formatDateDDMMYYYY(today)}`;
+        return `Subject: ${subject}\n\nNo filters available in the ${pool} pool.`;
+    }
+    
+    const subject = `Weekly Filter Status Report - ${pool} Pool - ${formatDateDDMMYYYY(today)}`;
     
     let emailBody = `Subject: ${subject}\n\n`;
-    emailBody += `WEEKLY FILTER STATUS REPORT\n`;
+    emailBody += `WEEKLY FILTER STATUS REPORT - ${pool} POOL\n`;
     emailBody += `Generated: ${formatDateDDMMYYYY(today)} at ${today.toLocaleTimeString()}\n`;
     emailBody += `Report Period: ${formatDateDDMMYYYY(today)} - ${formatDateDDMMYYYY(weekFromToday)}\n`;
+    emailBody += `Pool: ${pool} (${pool === 'WA' ? 'Filters 1, 2, 3' : 'Filter 4'})\n`;
     emailBody += `${'='.repeat(60)}\n\n`;
     
     // Summary section (moved to top)
-    const availableFilters = filters.filter(filter => {
+    const availableFilters = poolFilters.filter(filter => {
         const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
         return nextWeekBookings.length === 0;
     });
     
-    const servicesDue = filters.filter(filter => getServiceStatus(filter).isDue);
+    const servicesDue = poolFilters.filter(filter => getServiceStatus(filter).isDue);
     
     // Helper function to add location suffix to filter names
     const getFilterNameWithLocation = (filter) => {
@@ -1765,9 +1806,9 @@ function generateWeeklyReport() {
         return filter.name + locationSuffix;
     };
     
-    emailBody += `SUMMARY\n`;
-    emailBody += `Available Next Week: ${availableFilters.map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
-    emailBody += `Scheduled Next Week: ${filters.filter(f => !availableFilters.includes(f)).map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
+    emailBody += `FILTER AVAILABILITY SUMMARY\n`;
+    emailBody += `Available Operationally Next Week: ${availableFilters.map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
+    emailBody += `Not Available Next Week: ${poolFilters.filter(f => !availableFilters.includes(f)).map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
     
     if (servicesDue.length > 0) {
         emailBody += `Services Due: ${servicesDue.map(f => getFilterNameWithLocation(f)).join(', ')}\n`;
@@ -1776,7 +1817,7 @@ function generateWeeklyReport() {
     emailBody += `\n`;
     
     // Filter status overview
-    filters.forEach((filter, index) => {
+    poolFilters.forEach((filter, index) => {
         const filterNameWithLocation = getFilterNameWithLocation(filter);
         emailBody += `FILTER ${filter.id}: ${filterNameWithLocation} (${filter.location})\n`;
         
@@ -1815,9 +1856,12 @@ function generateWeeklyReport() {
         emailBody += `\n`;
     });
     
-    // Out of Service Accessories Section
-    emailBody += `OUT OF SERVICE ACCESSORIES\n`;
+    // Out of Service Accessories Section - filter by pool
+    emailBody += `OUT OF SERVICE ACCESSORIES - ${pool} POOL\n`;
     const outOfServiceAccessories = accessories.filter(acc => {
+        // Filter by pool first
+        if (acc.pool !== pool) return false;
+        
         if (!acc.outOfService || !acc.outOfService.isOutOfService) return false;
         
         const serviceStart = new Date(acc.outOfService.startDate);

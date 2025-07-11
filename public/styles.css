@@ -127,6 +127,26 @@ h1 {
     border-color: var(--accent-subtle);
 }
 
+.email-btn.wa-email {
+    background: #2563eb;
+    border-color: #2563eb;
+}
+
+.email-btn.wa-email:hover {
+    background: #3b82f6;
+    border-color: #3b82f6;
+}
+
+.email-btn.nsw-email {
+    background: #7c3aed;
+    border-color: #7c3aed;
+}
+
+.email-btn.nsw-email:hover {
+    background: #8b5cf6;
+    border-color: #8b5cf6;
+}
+
 .accessory-btn {
     background: var(--accent-success);
     color: var(--text-inverse);
