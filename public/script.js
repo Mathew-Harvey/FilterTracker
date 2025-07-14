@@ -1753,12 +1753,36 @@ function getBookingDateRanges(bookings) {
     }).join(', ');
 }
 
+// Helper function to format dates as DD/MM/YYYY
+function formatDateDDMMYYYY(date) {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
+
+function getNextWeekBookings(filter, startDate, endDate) {
+    if (!filter.bookings) return [];
+    
+    return filter.bookings.filter(booking => {
+        const bookingDate = new Date(booking.date);
+        return bookingDate >= startDate && bookingDate <= endDate;
+    }).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
 function generateWeeklyReport(pool) {
     const today = new Date();
-    const weekFromToday = new Date(today);
-    weekFromToday.setDate(today.getDate() + 7);
+    today.setHours(0, 0, 0, 0);
     
-    // Validate inputs
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
+    const daysToEndOfWeek = 6 - dayOfWeek; // Days to Saturday
+    const endOfCurrentWeek = new Date(today);
+    endOfCurrentWeek.setDate(today.getDate() + daysToEndOfWeek);
+    
+    const endOfNextWeek = new Date(endOfCurrentWeek);
+    endOfNextWeek.setDate(endOfCurrentWeek.getDate() + 7);
+    
+    // Validate pool parameter
     if (!pool || !['WA', 'NSW'].includes(pool)) {
         console.error('Invalid pool parameter:', pool);
         pool = 'WA'; // Default fallback
@@ -1789,14 +1813,14 @@ function generateWeeklyReport(pool) {
     let emailBody = `Subject: ${subject}\n\n`;
     emailBody += `WEEKLY FILTER STATUS REPORT - ${pool} POOL\n`;
     emailBody += `Generated: ${formatDateDDMMYYYY(today)} at ${today.toLocaleTimeString()}\n`;
-    emailBody += `Report Period: ${formatDateDDMMYYYY(today)} - ${formatDateDDMMYYYY(weekFromToday)}\n`;
+    emailBody += `Report Period: ${formatDateDDMMYYYY(today)} - ${formatDateDDMMYYYY(endOfNextWeek)}\n`;
     emailBody += `Pool: ${pool} (${pool === 'WA' ? 'Filters 1, 2, 3' : 'Filter 4'})\n`;
     emailBody += `${'='.repeat(60)}\n\n`;
     
     // Summary section (moved to top)
     const availableFilters = poolFilters.filter(filter => {
-        const nextWeekBookings = getNextWeekBookings(filter, today, weekFromToday);
-        return nextWeekBookings.length === 0;
+        const periodBookings = getNextWeekBookings(filter, today, endOfNextWeek);
+        return periodBookings.length === 0;
     });
     
     const servicesDue = poolFilters.filter(filter => getServiceStatus(filter).isDue);
@@ -1808,8 +1832,8 @@ function generateWeeklyReport(pool) {
     };
     
     emailBody += `FILTER AVAILABILITY SUMMARY\n`;
-    emailBody += `Available Operationally Next Week: ${availableFilters.map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
-    emailBody += `Not Available Next Week: ${poolFilters.filter(f => !availableFilters.includes(f)).map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
+    emailBody += `Available Operationally (${formatDateDDMMYYYY(today)} to ${formatDateDDMMYYYY(endOfNextWeek)}): ${availableFilters.map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
+    emailBody += `Booked During Period: ${poolFilters.filter(f => !availableFilters.includes(f)).map(f => getFilterNameWithLocation(f)).join(', ') || 'None'}\n`;
     
     if (servicesDue.length > 0) {
         emailBody += `Services Due: ${servicesDue.map(f => getFilterNameWithLocation(f)).join(', ')}\n`;
@@ -1839,11 +1863,10 @@ function generateWeeklyReport(pool) {
             emailBody += `Service: No history\n`;
         }
         
-        // Bookings - show date ranges with accessories
-        const allFilterBookings = getAllFilterBookings(filter);
-        
-        if (allFilterBookings.length > 0) {
-            const bookingRanges = getBookingDateRanges(allFilterBookings);
+        // Bookings - show only future bookings
+        const futureBookings = filter.bookings?.filter(b => new Date(b.date) >= today).sort((a, b) => new Date(a.date) - new Date(b.date)) || [];
+        if (futureBookings.length > 0) {
+            const bookingRanges = getBookingDateRanges(futureBookings);
             emailBody += `Bookings: ${bookingRanges}\n`;
         } else {
             emailBody += `Bookings: Available\n`;
@@ -1867,10 +1890,10 @@ function generateWeeklyReport(pool) {
         
         const serviceStart = new Date(acc.outOfService.startDate);
         const serviceEnd = new Date(acc.outOfService.endDate);
-        const weekEnd = new Date(weekFromToday);
+        const periodEnd = new Date(endOfNextWeek);
         
-        // Include if currently out of service or will be out of service within the week
-        return serviceEnd >= today && serviceStart <= weekEnd;
+        // Include if currently out of service or will be out of service within the period
+        return serviceEnd >= today && serviceStart <= periodEnd;
     });
     
     if (outOfServiceAccessories.length > 0) {
@@ -1889,89 +1912,6 @@ function generateWeeklyReport(pool) {
     emailBody += `Kind Regards, Kyden and Mat\n`;
     
     return emailBody;
-}
-
-function getNextWeekBookings(filter, startDate, endDate) {
-    if (!filter.bookings) return [];
-    
-    return filter.bookings.filter(booking => {
-        const bookingDate = new Date(booking.date);
-        return bookingDate >= startDate && bookingDate <= endDate;
-    }).sort((a, b) => new Date(a.date) - new Date(b.date));
-}
-
-function getWeeklyAccessoryAllocations(filter, startDate, endDate) {
-    const nextWeekBookings = getNextWeekBookings(filter, startDate, endDate);
-    const accessoryMap = new Map();
-    
-    nextWeekBookings.forEach(booking => {
-        if (booking.accessories && booking.accessories.length > 0) {
-            booking.accessories.forEach(accessory => {
-                const key = accessory.id || accessory.name;
-                if (accessoryMap.has(key)) {
-                    const existing = accessoryMap.get(key);
-                    existing.totalQuantity += accessory.quantity;
-                    existing.days += 1;
-                } else {
-                    accessoryMap.set(key, {
-                        name: accessory.name,
-                        totalQuantity: accessory.quantity,
-                        unit: accessory.unit || '',
-                        days: 1
-                    });
-                }
-            });
-        }
-    });
-    
-    return Array.from(accessoryMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function generateAccessorySummary(startDate, endDate) {
-    // Calculate overall accessory usage across all filters
-    const accessoryUsage = new Map();
-    const accessoryAvailability = [];
-    
-    filters.forEach(filter => {
-        const allocations = getWeeklyAccessoryAllocations(filter, startDate, endDate);
-        allocations.forEach(allocation => {
-            const key = allocation.name;
-            if (accessoryUsage.has(key)) {
-                const existing = accessoryUsage.get(key);
-                existing.totalAllocated += allocation.totalQuantity;
-                existing.filtersUsing.add(filter.name);
-            } else {
-                accessoryUsage.set(key, {
-                    name: allocation.name,
-                    totalAllocated: allocation.totalQuantity,
-                    unit: allocation.unit,
-                    filtersUsing: new Set([filter.name])
-                });
-            }
-        });
-    });
-    
-    // Check availability status for each accessory
-    accessories.forEach(accessory => {
-        const usage = accessoryUsage.get(accessory.name);
-        const allocated = usage ? usage.totalAllocated : 0;
-        const available = accessory.quantity - allocated;
-        
-        accessoryAvailability.push({
-            name: accessory.name,
-            pool: accessory.pool,
-            total: accessory.quantity,
-            allocated: allocated,
-            available: available,
-            unit: accessory.unit || '',
-            percentUsed: accessory.quantity > 0 ? Math.round((allocated / accessory.quantity) * 100) : 0
-        });
-    });
-    
-    return {
-        usage: Array.from(accessoryUsage.values()),
-        availability: accessoryAvailability.sort((a, b) => b.percentUsed - a.percentUsed)
-    };
 }
 
 async function copyEmailToClipboard() {
