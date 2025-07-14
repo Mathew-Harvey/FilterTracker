@@ -64,37 +64,39 @@ async function initDB() {
     if (accessoryCount === 0) {
       const defaultAccessories = [
         // NSW Pool
-        { id: 1, name: "Trash pump", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 2, name: "Large Hydraulic power unit", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 3, name: "100m length of 100mm tiger tail hose", pool: "NSW", quantity: 1, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 4, name: "Rapid reel", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 5, name: "15m length of 50mm floating tiger tail hose", pool: "NSW", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 6, name: "15m length of 75mm floating tiger tail hose", pool: "NSW", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 7, name: "75mm camlock fitting funnel hand tools", pool: "NSW", quantity: 6, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 8, name: "100mm to 2x50mm camlock t-piece", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 9, name: "100mm to 2x75mm camlock t-piece", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
+        { id: 1, name: "Trash pump", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 2, name: "Large Hydraulic power unit", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 3, name: "100m length of 100mm tiger tail hose", pool: "NSW", quantity: 1, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 4, name: "Rapid reel", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 5, name: "15m length of 50mm floating tiger tail hose", pool: "NSW", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 2 },
+        { id: 6, name: "15m length of 75mm floating tiger tail hose", pool: "NSW", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 2 },
+        { id: 7, name: "75mm camlock fitting funnel hand tools", pool: "NSW", quantity: 6, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 8, name: "100mm to 2x50mm camlock t-piece", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 9, name: "100mm to 2x75mm camlock t-piece", pool: "NSW", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 31, name: "Filter power cable", pool: "NSW", quantity: 1, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
         
         // WA Pool
-        { id: 10, name: "Large Trash pump", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 12, name: "3/4 inch hydrolic leads", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 13, name: "Small trash pump", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 14, name: "1/2 inch hydrolic leads", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 15, name: "Small hydraulic power unit", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 16, name: "Spill bund mat", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 17, name: "Hydraulic power unit", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 18, name: "100m length of 100mm tiger tail hose", pool: "WA", quantity: 1, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 19, name: "Rapid reel", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 20, name: "15m length of 50mm floating tiger tail hose", pool: "WA", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 21, name: "15m length of 75mm floating tiger tail hose", pool: "WA", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 22, name: "75mm camlock fitting funnel hand tool", pool: "WA", quantity: 3, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 23, name: "50mm camlock fitting funnel hand tool", pool: "WA", quantity: 3, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 24, name: "100mm to 2x50mm camlock t-piece", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 25, name: "100mm to 2x75mm camlock t-piece", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 26, name: "100mm inline sampling t-piece", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 27, name: "50mm push hand tools", pool: "WA", quantity: 4, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 28, name: "50mm pull hand tools", pool: "WA", quantity: 4, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 29, name: "75mm camlock blanking caps", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } },
-        { id: 30, name: "Step Ladder", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" } }
+        { id: 10, name: "Large Trash pump", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 12, name: "3/4 inch hydrolic leads", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 13, name: "Small trash pump", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 14, name: "1/2 inch hydrolic leads", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 15, name: "Small hydraulic power unit", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 16, name: "Spill bund mat", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 17, name: "Hydraulic power unit", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 18, name: "100m length of 100mm tiger tail hose", pool: "WA", quantity: 1, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 19, name: "Rapid reel", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 20, name: "15m length of 50mm floating tiger tail hose", pool: "WA", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 2 },
+        { id: 21, name: "15m length of 75mm floating tiger tail hose", pool: "WA", quantity: 2, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 2 },
+        { id: 22, name: "75mm camlock fitting funnel hand tool", pool: "WA", quantity: 3, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 23, name: "50mm camlock fitting funnel hand tool", pool: "WA", quantity: 3, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 24, name: "100mm to 2x50mm camlock t-piece", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 25, name: "100mm to 2x75mm camlock t-piece", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 26, name: "100mm inline sampling t-piece", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 27, name: "50mm push hand tools", pool: "WA", quantity: 4, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 28, name: "50mm pull hand tools", pool: "WA", quantity: 4, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 },
+        { id: 29, name: "75mm camlock blanking caps", pool: "WA", quantity: 2, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 30, name: "Step Ladder", pool: "WA", quantity: 1, notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: false, requiredPerBooking: 1 },
+        { id: 32, name: "Filter power cable", pool: "WA", quantity: 1, unit: "", notes: "", allocatedFilters: [], outOfService: { isOutOfService: false, startDate: null, endDate: null, reason: "" }, isCritical: true, requiredPerBooking: 1 }
       ];
       await accessories.insertMany(defaultAccessories);
     }
@@ -153,7 +155,9 @@ app.post('/api/accessories', async (req, res) => {
       unit: req.body.unit || "",
       notes: req.body.notes || "",
       allocatedFilters: [],
-      outOfService: req.body.outOfService || { isOutOfService: false, startDate: null, endDate: null, reason: "" }
+      outOfService: req.body.outOfService || { isOutOfService: false, startDate: null, endDate: null, reason: "" },
+      isCritical: req.body.isCritical || false,
+      requiredPerBooking: req.body.requiredPerBooking || 1
     };
     
     await db.collection("accessories").insertOne(newAccessory);

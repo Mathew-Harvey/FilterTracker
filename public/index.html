@@ -116,6 +116,17 @@
                 </div>
                 <div class="form-group">
                     <label class="checkbox-label">
+                        <input type="checkbox" id="isCritical">
+                        <span class="checkmark"></span>
+                        Critical for Filter Operation
+                    </label>
+                </div>
+                <div class="form-group" id="requiredQuantityGroup" style="display: none;">
+                    <label>Required Quantity per Filter Booking</label>
+                    <input type="number" id="requiredPerBooking" min="1" value="1">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
                         <input type="checkbox" id="outOfServiceCheck" onchange="toggleOutOfServiceFields()">
                         <span class="checkmark"></span>
                         Out of Service / Maintenance Mode

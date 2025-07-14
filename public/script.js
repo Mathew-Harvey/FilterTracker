@@ -52,7 +52,9 @@ async function fetchAccessories() {
                 startDate: null, 
                 endDate: null, 
                 reason: "" 
-            }
+            },
+            isCritical: accessory.isCritical || false,
+            requiredPerBooking: accessory.requiredPerBooking || 1
         }));
         
         renderAccessoryList();
@@ -278,7 +280,7 @@ function renderAccessoryList() {
             <div class="accessory-item ${isOutOfService ? 'out-of-service-item' : ''}">
                 <div class="accessory-item-header">
                     <div>
-                        <div class="accessory-name">${accessory.name}</div>
+                        <div class="accessory-name">${accessory.name} ${accessory.isCritical ? '<span class="critical-tag">Critical</span>' : ''}</div>
                         <div class="accessory-pool">${accessory.pool}</div>
                     </div>
                     ${isOutOfService ? '<div class="service-status-icon">🔧</div>' : ''}
@@ -304,6 +306,12 @@ function renderAccessoryList() {
                     <div class="accessory-detail">
                         <span>Service Period:</span>
                         <span>${new Date(accessory.outOfService.startDate).toLocaleDateString()} - ${new Date(accessory.outOfService.endDate).toLocaleDateString()}</span>
+                    </div>
+                    ` : ''}
+                    ${accessory.isCritical ? `
+                    <div class="accessory-detail">
+                        <span>Required per Booking:</span>
+                        <span>${accessory.requiredPerBooking}</span>
                     </div>
                     ` : ''}
                 </div>
@@ -343,6 +351,11 @@ function openAccessoryForm(accessory = null) {
         document.getElementById('serviceEndDate').value = outOfService.endDate || '';
         document.getElementById('serviceReason').value = outOfService.reason || '';
         
+        // Set critical fields
+        document.getElementById('isCritical').checked = accessory.isCritical;
+        document.getElementById('requiredPerBooking').value = accessory.requiredPerBooking;
+        document.getElementById('requiredQuantityGroup').style.display = accessory.isCritical ? 'block' : 'none';
+        
         toggleOutOfServiceFields();
     } else {
         title.textContent = 'Add New Accessory';
@@ -358,10 +371,20 @@ function openAccessoryForm(accessory = null) {
         document.getElementById('serviceEndDate').value = '';
         document.getElementById('serviceReason').value = '';
         
+        // Reset critical fields
+        document.getElementById('isCritical').checked = false;
+        document.getElementById('requiredPerBooking').value = 1;
+        document.getElementById('requiredQuantityGroup').style.display = 'none';
+        
         toggleOutOfServiceFields();
     }
     
     modal.style.display = 'block';
+    
+    // Add event listener for critical checkbox
+    document.getElementById('isCritical').addEventListener('change', function() {
+        document.getElementById('requiredQuantityGroup').style.display = this.checked ? 'block' : 'none';
+    });
 }
 
 function closeAccessoryForm() {
@@ -619,6 +642,10 @@ async function saveAccessory() {
     const unit = document.getElementById('accessoryUnit').value.trim();
     const notes = document.getElementById('accessoryNotes').value.trim();
     
+    // Get critical fields
+    const isCritical = document.getElementById('isCritical').checked;
+    const requiredPerBooking = parseInt(document.getElementById('requiredPerBooking').value) || 1;
+    
     // Get out of service data
     const isOutOfService = document.getElementById('outOfServiceCheck').checked;
     const outOfService = {
@@ -650,7 +677,7 @@ async function saveAccessory() {
         }
     }
     
-    const accessoryData = { name, pool, quantity, unit, notes, outOfService };
+    const accessoryData = { name, pool, quantity, unit, notes, outOfService, isCritical, requiredPerBooking };
     
     let success = false;
     if (currentEditingAccessory) {
@@ -681,11 +708,39 @@ async function renderAccessorySelection() {
     
     const availableAccessories = await fetchAvailableAccessories(selectedFilter.id, startDate, endDate);
     
+    // Critical accessories check
+    let warningHTML = '';
+    const criticalAccessories = availableAccessories.filter(acc => acc.isCritical);
+    const insufficientCritical = criticalAccessories.filter(acc => acc.availableQuantity < acc.requiredPerBooking && !acc.isOutOfServiceDuringPeriod);
+    const outOfServiceCritical = criticalAccessories.filter(acc => acc.isOutOfServiceDuringPeriod);
+    
+    if (insufficientCritical.length > 0 || outOfServiceCritical.length > 0) {
+        warningHTML = `
+            <div class="critical-warning">
+                <h4>⚠️ Critical Accessory Alert</h4>
+                <p>Some critical accessories for filter operation may not be available for the selected dates. These can be rented or leased if needed.</p>
+                ${outOfServiceCritical.length > 0 ? `
+                    <h5>Out of Service:</h5>
+                    <ul>
+                        ${outOfServiceCritical.map(acc => `<li>${acc.name}</li>`).join('')}
+                    </ul>
+                ` : ''}
+                ${insufficientCritical.length > 0 ? `
+                    <h5>Insufficient Quantity:</h5>
+                    <ul>
+                        ${insufficientCritical.map(acc => `<li>${acc.name} (Available: ${acc.availableQuantity}, Required: ${acc.requiredPerBooking})</li>`).join('')}
+                    </ul>
+                ` : ''}
+            </div>
+        `;
+    }
+    
     const container = document.getElementById('accessorySelectionContainer');
     if (!container) return;
     
     container.innerHTML = `
         <h4>Available Accessories for Selected Dates</h4>
+        ${warningHTML}
         <div class="available-accessories">
             ${availableAccessories.map(accessory => {
                 const isOutOfService = accessory.isOutOfServiceDuringPeriod || false;
@@ -694,10 +749,10 @@ async function renderAccessorySelection() {
                 const allocatedDisplay = accessory.allocatedCount > 0 ? ` (${accessory.allocatedCount} allocated)` : '';
                 
                 return `
-                    <div class="available-accessory ${isOutOfService ? 'out-of-service' : ''} ${isDisabled ? 'disabled' : ''}" data-accessory-id="${accessory.id}">
+                    <div class="available-accessory ${isOutOfService ? 'out-of-service' : ''} ${isDisabled ? 'disabled' : ''} ${accessory.isCritical ? 'critical-accessory' : ''}" data-accessory-id="${accessory.id}">
                         <div class="accessory-info">
                             <div class="accessory-info-name">
-                                ${accessory.name}
+                                ${accessory.name} ${accessory.isCritical ? '<span class="critical-tag">Critical</span>' : ''}
                                 ${isOutOfService ? ' 🔧' : ''}
                             </div>
                             <div class="accessory-info-available">
@@ -709,6 +764,9 @@ async function renderAccessorySelection() {
                             ${isOutOfService && accessory.outOfService.reason ? 
                                 `<div class="service-reason">Reason: ${accessory.outOfService.reason}</div>` : 
                                 ''
+                            }
+                            ${accessory.isCritical ? 
+                                `<div class="critical-required">Required per booking: ${accessory.requiredPerBooking}</div>` : ''
                             }
                         </div>
                         <div class="accessory-input">
