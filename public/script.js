@@ -18,6 +18,7 @@ async function fetchFilters() {
     try {
         const response = await fetch('/api/filters');
         filters = await response.json();
+        filters.sort((a, b) => a.id - b.id);
         renderFilters();
     } catch (error) {
         console.error('Error fetching filters:', error);
