@@ -123,7 +123,8 @@ function renderFilters() {
     const container = document.getElementById('filters');
     container.innerHTML = filters.map(filter => {
         const capability = getFilterCapability(filter);
-        const hasBookings = filter.bookings && filter.bookings.length > 0;
+        const futureRanges = getFutureBookingRanges(filter);
+        const hasFutureBookings = futureRanges.length > 0;
         const serviceStatus = getServiceStatus(filter);
         
         return `
@@ -154,8 +155,8 @@ function renderFilters() {
                     <div class="location-label">Location:</div>
                     <div class="location-value">${filter.location}</div>
                 </div>
-                <div class="booking-indicator ${hasBookings ? 'booked' : 'available'}">
-                    ${hasBookings ? `${filter.bookings.length} Bookings` : 'Available'}
+                <div class="booking-indicator ${hasFutureBookings ? 'booked' : 'available'}">
+                    ${hasFutureBookings ? futureRanges.join('<br>') : 'Available'}
                 </div>
             </div>
         `;
@@ -2451,4 +2452,38 @@ function closeAccessoryEditModal() {
     if (window.editingDates) {
         delete window.editingDates;
     }
+}
+
+// Add this new function after the getServiceStatus function
+
+function getFutureBookingRanges(filter) {
+    const today = new Date().toISOString().split('T')[0];
+    const futureBookings = (filter.bookings || []).filter(b => b.date >= today)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    if (futureBookings.length === 0) return [];
+    const ranges = [];
+    let currentStart = futureBookings[0].date;
+    let currentEnd = futureBookings[0].date;
+    for (let i = 1; i < futureBookings.length; i++) {
+        const prevDate = new Date(currentEnd);
+        const thisDate = new Date(futureBookings[i].date);
+        const dayDiff = (thisDate - prevDate) / (1000 * 60 * 60 * 24);
+        if (dayDiff === 1) {
+            currentEnd = futureBookings[i].date;
+        } else {
+            ranges.push({start: currentStart, end: currentEnd});
+            currentStart = futureBookings[i].date;
+            currentEnd = futureBookings[i].date;
+        }
+    }
+    ranges.push({start: currentStart, end: currentEnd});
+    return ranges.map(range => {
+        const startDate = new Date(range.start);
+        const endDate = new Date(range.end);
+        if (range.start === range.end) {
+            return formatDateDDMMYYYY(startDate);
+        } else {
+            return `${formatDateDDMMYYYY(startDate)} - ${formatDateDDMMYYYY(endDate)}`;
+        }
+    });
 }
