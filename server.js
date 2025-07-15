@@ -155,7 +155,7 @@ app.post('/api/accessories', async (req, res) => {
       unit: req.body.unit || "",
       notes: req.body.notes || "",
       allocatedFilters: [],
-      outOfService: req.body.outOfService || { isOutOfService: false, startDate: null, endDate: null, reason: "" },
+      outOfService: req.body.outOfService || [],
       isCritical: req.body.isCritical || false,
       requiredPerBooking: req.body.requiredPerBooking || 1
     };
@@ -196,6 +196,17 @@ app.delete('/api/accessories/:id', async (req, res) => {
 app.post('/api/accessories/available', async (req, res) => {
   try {
     const { filterId, startDate, endDate } = req.body;
+    function getDatesInRange(start, end) {
+      const dates = [];
+      let current = new Date(start);
+      const endDate = new Date(end);
+      while (current <= endDate) {
+        dates.push(new Date(current).toISOString().split('T')[0]);
+        current.setDate(current.getDate() + 1);
+      }
+      return dates;
+    }
+    const allDates = getDatesInRange(startDate, endDate);
     const db = client.db("filterTracker");
     
     // Get all accessories
@@ -218,20 +229,6 @@ app.post('/api/accessories/available', async (req, res) => {
     availableAccessories = availableAccessories.map(accessory => {
       let allocatedCount = 0;
       let isOutOfServiceDuringPeriod = false;
-      
-      // Check if accessory is out of service during the requested period
-      if (accessory.outOfService && accessory.outOfService.isOutOfService) {
-        const outOfServiceStart = new Date(accessory.outOfService.startDate);
-        const outOfServiceEnd = new Date(accessory.outOfService.endDate);
-        const requestStart = new Date(startDate);
-        const requestEnd = new Date(endDate);
-        
-        // Check if there's any overlap between out of service period and requested period
-        isOutOfServiceDuringPeriod = !(outOfServiceEnd < requestStart || outOfServiceStart > requestEnd);
-      }
-      
-      // Track maximum allocation for any single day within the date range
-      // This prevents double-counting when same accessory is used across multiple days
       const dailyAllocations = new Map();
       
       // Check allocations across all filters for the date range
@@ -255,17 +252,26 @@ app.post('/api/accessories/available', async (req, res) => {
         }
       });
       
-      // Find the maximum allocation on any single day
-      // This represents the minimum quantity needed to satisfy all concurrent bookings
       allocatedCount = dailyAllocations.size > 0 ? Math.max(...dailyAllocations.values()) : 0;
-
-      // Calculate available quantity, ensuring it's never negative
-      let availableQuantity;
-      if (isOutOfServiceDuringPeriod) {
-        availableQuantity = 0;
-      } else {
-        availableQuantity = Math.max(0, accessory.quantity - allocatedCount);
+      const outOfService = Array.isArray(accessory.outOfService) ? accessory.outOfService : (accessory.outOfService && accessory.outOfService.isOutOfService ? [{quantity: accessory.quantity, startDate: accessory.outOfService.startDate, endDate: accessory.outOfService.endDate, reason: accessory.outOfService.reason}] : []);
+      let minAvailable = Infinity;
+      isOutOfServiceDuringPeriod = false;
+      for (const date of allDates) {
+        let outThatDay = 0;
+        outOfService.forEach(os => {
+          const osStart = new Date(os.startDate);
+          const osEnd = new Date(os.endDate);
+          const currentDate = new Date(date);
+          if (osStart <= currentDate && currentDate <= osEnd) {
+            outThatDay += os.quantity || 1;
+          }
+        });
+        if (outThatDay > 0) isOutOfServiceDuringPeriod = true;
+        const allocatedThatDay = dailyAllocations.get(date) || 0;
+        const availableThatDay = accessory.quantity - outThatDay - allocatedThatDay;
+        minAvailable = Math.min(minAvailable, availableThatDay);
       }
+      const availableQuantity = Math.max(0, minAvailable);
       
       return {
         ...accessory,

@@ -43,20 +43,14 @@ async function fetchAccessories() {
     try {
         const response = await fetch('/api/accessories');
         accessories = await response.json();
-        
-        // Ensure all accessories have outOfService field for backward compatibility
         accessories = accessories.map(accessory => ({
             ...accessory,
-            outOfService: accessory.outOfService || { 
-                isOutOfService: false, 
-                startDate: null, 
-                endDate: null, 
-                reason: "" 
-            },
+            outOfService: Array.isArray(accessory.outOfService) ? accessory.outOfService :
+                (accessory.outOfService && accessory.outOfService.isOutOfService ?
+                    [{ quantity: accessory.quantity, startDate: accessory.outOfService.startDate, endDate: accessory.outOfService.endDate, reason: accessory.outOfService.reason }] : []),
             isCritical: accessory.isCritical || false,
             requiredPerBooking: accessory.requiredPerBooking || 1
         }));
-        
         renderAccessoryList();
     } catch (error) {
         console.error('Error fetching accessories:', error);
@@ -223,7 +217,6 @@ function switchPool(pool) {
 function renderAccessoryList() {
     const container = document.getElementById('accessoryList');
     const poolAccessories = accessories.filter(acc => acc.pool === currentPool);
-    
     if (poolAccessories.length === 0) {
         container.innerHTML = `
             <div style="text-align: center; padding: 40px; color: var(--text-muted);">
@@ -233,14 +226,11 @@ function renderAccessoryList() {
         `;
         return;
     }
-    
     container.innerHTML = poolAccessories.map(accessory => {
-        const isOutOfService = accessory.outOfService && accessory.outOfService.isOutOfService;
-        const quantityClass = isOutOfService ? 'out-of-service' :
+        const hasOutOfService = accessory.outOfService.length > 0;
+        const quantityClass = hasOutOfService ? 'limited' : 
                               accessory.quantity <= 1 ? 'limited' : 
                               accessory.quantity === 0 ? 'unavailable' : '';
-        
-        // Calculate current allocations across all filters
         let currentAllocated = 0;
         if (filters && filters.length > 0) {
             const today = new Date();
@@ -263,31 +253,22 @@ function renderAccessoryList() {
             });
         }
         
-        // Check if currently out of service
         let outOfServiceStatus = '';
-        if (isOutOfService) {
-            const startDate = new Date(accessory.outOfService.startDate).toLocaleDateString();
-            const endDate = new Date(accessory.outOfService.endDate).toLocaleDateString();
-            outOfServiceStatus = `
-                <div class="out-of-service-banner">
-                    🔧 OUT OF SERVICE: ${startDate} - ${endDate}
-                    ${accessory.outOfService.reason ? `<br><small>${accessory.outOfService.reason}</small>` : ''}
-                </div>
-            `;
+        if (hasOutOfService) {
+            outOfServiceStatus = `<div class="out-of-service-banner">🔧 ${accessory.outOfService.length} Out of Service Period${accessory.outOfService.length > 1 ? 's' : ''}</div>`;
         }
         
         return `
-            <div class="accessory-item ${isOutOfService ? 'out-of-service-item' : ''}">
+            <div class="accessory-item ${hasOutOfService ? 'out-of-service-item' : ''}">
                 <div class="accessory-item-header">
                     <div>
                         <div class="accessory-name">${accessory.name} ${accessory.isCritical ? '<span class="critical-tag">Critical</span>' : ''}</div>
                         <div class="accessory-pool">${accessory.pool}</div>
                     </div>
-                    ${isOutOfService ? '<div class="service-status-icon">🔧</div>' : ''}
                 </div>
                 ${outOfServiceStatus}
                 <div class="accessory-quantity ${quantityClass}">
-                    ${isOutOfService ? 'OUT OF SERVICE' : `${accessory.quantity} ${accessory.unit || 'units'}`}
+                    ${hasOutOfService ? 'OUT OF SERVICE' : `${accessory.quantity} ${accessory.unit || 'units'}`}
                 </div>
                 <div class="accessory-details">
                     <div class="accessory-detail">
@@ -302,10 +283,10 @@ function renderAccessoryList() {
                         <span>Available Now:</span>
                         <span class="${Math.max(0, accessory.quantity - currentAllocated) === 0 ? 'unavailable-quantity' : 'available-quantity'}">${Math.max(0, accessory.quantity - currentAllocated)}</span>
                     </div>
-                    ${isOutOfService ? `
+                    ${hasOutOfService ? `
                     <div class="accessory-detail">
                         <span>Service Period:</span>
-                        <span>${new Date(accessory.outOfService.startDate).toLocaleDateString()} - ${new Date(accessory.outOfService.endDate).toLocaleDateString()}</span>
+                        <span>${new Date(accessory.outOfService[0].startDate).toLocaleDateString()} - ${new Date(accessory.outOfService[accessory.outOfService.length - 1].endDate).toLocaleDateString()}</span>
                     </div>
                     ` : ''}
                     ${accessory.isCritical ? `
@@ -320,10 +301,6 @@ function renderAccessoryList() {
                 </div>
                 <div class="accessory-actions">
                     <button class="btn-edit" onclick="editAccessory(${accessory.id})">Edit</button>
-                    ${isOutOfService ? 
-                        `<button class="btn-service" onclick="clearOutOfService(${accessory.id})">Return to Service</button>` :
-                        `<button class="btn-service" onclick="setOutOfService(${accessory.id})">Set Out of Service</button>`
-                    }
                     <button class="btn-delete" onclick="confirmDeleteAccessory(${accessory.id})">Delete</button>
                 </div>
             </div>
@@ -335,7 +312,6 @@ function openAccessoryForm(accessory = null) {
     currentEditingAccessory = accessory;
     const modal = document.getElementById('accessoryFormModal');
     const title = document.getElementById('accessoryFormTitle');
-    
     if (accessory) {
         title.textContent = 'Edit Accessory';
         document.getElementById('accessoryName').value = accessory.name;
@@ -343,20 +319,7 @@ function openAccessoryForm(accessory = null) {
         document.getElementById('accessoryQuantity').value = accessory.quantity;
         document.getElementById('accessoryUnit').value = accessory.unit || '';
         document.getElementById('accessoryNotes').value = accessory.notes || '';
-        
-        // Set out of service fields
-        const outOfService = accessory.outOfService || { isOutOfService: false, startDate: null, endDate: null, reason: '' };
-        document.getElementById('outOfServiceCheck').checked = outOfService.isOutOfService;
-        document.getElementById('serviceStartDate').value = outOfService.startDate || '';
-        document.getElementById('serviceEndDate').value = outOfService.endDate || '';
-        document.getElementById('serviceReason').value = outOfService.reason || '';
-        
-        // Set critical fields
-        document.getElementById('isCritical').checked = accessory.isCritical;
-        document.getElementById('requiredPerBooking').value = accessory.requiredPerBooking;
-        document.getElementById('requiredQuantityGroup').style.display = accessory.isCritical ? 'block' : 'none';
-        
-        toggleOutOfServiceFields();
+        tempOutOfService = [...(accessory.outOfService || [])];
     } else {
         title.textContent = 'Add New Accessory';
         document.getElementById('accessoryName').value = '';
@@ -364,27 +327,13 @@ function openAccessoryForm(accessory = null) {
         document.getElementById('accessoryQuantity').value = 1;
         document.getElementById('accessoryUnit').value = '';
         document.getElementById('accessoryNotes').value = '';
-        
-        // Reset out of service fields
-        document.getElementById('outOfServiceCheck').checked = false;
-        document.getElementById('serviceStartDate').value = '';
-        document.getElementById('serviceEndDate').value = '';
-        document.getElementById('serviceReason').value = '';
-        
-        // Reset critical fields
-        document.getElementById('isCritical').checked = false;
-        document.getElementById('requiredPerBooking').value = 1;
-        document.getElementById('requiredQuantityGroup').style.display = 'none';
-        
-        toggleOutOfServiceFields();
+        tempOutOfService = [];
     }
-    
+    renderOutOfServiceList();
     modal.style.display = 'block';
-    
-    // Add event listener for critical checkbox
-    document.getElementById('isCritical').addEventListener('change', function() {
-        document.getElementById('requiredQuantityGroup').style.display = this.checked ? 'block' : 'none';
-    });
+    // Add event listener for add button
+    document.getElementById('addOutOfServiceBtn').addEventListener('click', () => openOutOfServiceModalForEdit());
+    // Existing critical listener
 }
 
 function closeAccessoryForm() {
@@ -573,22 +522,19 @@ function confirmOutOfService() {
         alert('Please select a service period');
         return;
     }
-    
-    if (!currentServiceAccessory) return;
-    
-    const reason = document.getElementById('serviceReasonInput').value.trim();
     const sortedDates = serviceSelectedDates.sort();
     const startDate = sortedDates[0];
     const endDate = sortedDates[sortedDates.length - 1];
-    
-    const outOfService = {
-        isOutOfService: true,
-        startDate: startDate,
-        endDate: endDate,
-        reason: reason
-    };
-    
-    updateAccessory(currentServiceAccessory.id, { outOfService });
+    const reason = document.getElementById('serviceReasonInput').value.trim();
+    const quantity = parseInt(document.getElementById('serviceQuantity').value) || 1;
+    const period = { quantity, startDate, endDate, reason };
+    if (isEditingPeriod) {
+        tempOutOfService.push(period);
+        renderOutOfServiceList();
+        isEditingPeriod = false;
+    } else {
+        // For direct add from list, but since we removed, perhaps not needed
+    }
     closeOutOfServiceModal();
 }
 
@@ -677,7 +623,7 @@ async function saveAccessory() {
         }
     }
     
-    const accessoryData = { name, pool, quantity, unit, notes, outOfService, isCritical, requiredPerBooking };
+    const accessoryData = { name, pool, quantity, unit, notes, outOfService: tempOutOfService, isCritical, requiredPerBooking };
     
     let success = false;
     if (currentEditingAccessory) {
@@ -757,12 +703,12 @@ async function renderAccessorySelection() {
                             </div>
                             <div class="accessory-info-available">
                                 ${isOutOfService ? 
-                                    `<span class="out-of-service-text">OUT OF SERVICE (${new Date(accessory.outOfService.startDate).toLocaleDateString()} - ${new Date(accessory.outOfService.endDate).toLocaleDateString()})</span>` :
+                                    `<span class="out-of-service-text">OUT OF SERVICE (${new Date(accessory.outOfService[0].startDate).toLocaleDateString()} - ${new Date(accessory.outOfService[accessory.outOfService.length - 1].endDate).toLocaleDateString()})</span>` :
                                     `Available: ${availableQty}/${accessory.quantity}${accessory.unit ? ` ${accessory.unit}` : ''}${allocatedDisplay}`
                                 }
                             </div>
-                            ${isOutOfService && accessory.outOfService.reason ? 
-                                `<div class="service-reason">Reason: ${accessory.outOfService.reason}</div>` : 
+                            ${isOutOfService && accessory.outOfService.length > 0 ? 
+                                `<div class="service-reason">Reason: ${accessory.outOfService.map(period => `${period.quantity} units: ${period.startDate} - ${period.endDate} (${period.reason})`).join(', ')}</div>` : 
                                 ''
                             }
                             ${accessory.isCritical ? 
@@ -1947,8 +1893,8 @@ function generateWeeklyReport(pool) {
         
         if (!acc.outOfService || !acc.outOfService.isOutOfService) return false;
         
-        const serviceStart = new Date(acc.outOfService.startDate);
-        const serviceEnd = new Date(acc.outOfService.endDate);
+        const serviceStart = new Date(acc.outOfService[0].startDate);
+        const serviceEnd = new Date(acc.outOfService[acc.outOfService.length - 1].endDate);
         const periodEnd = new Date(endOfNextWeek);
         
         // Include if currently out of service or will be out of service within the period
@@ -1957,9 +1903,9 @@ function generateWeeklyReport(pool) {
     
     if (outOfServiceAccessories.length > 0) {
         outOfServiceAccessories.forEach(accessory => {
-            const startDate = formatDateDDMMYYYY(new Date(accessory.outOfService.startDate));
-            const endDate = formatDateDDMMYYYY(new Date(accessory.outOfService.endDate));
-            const reason = accessory.outOfService.reason ? ` (${accessory.outOfService.reason})` : '';
+            const startDate = formatDateDDMMYYYY(new Date(accessory.outOfService[0].startDate));
+            const endDate = formatDateDDMMYYYY(new Date(accessory.outOfService[accessory.outOfService.length - 1].endDate));
+            const reason = accessory.outOfService.length > 0 ? ` (${accessory.outOfService.map(period => `${period.quantity} units: ${period.startDate} - ${period.endDate} (${period.reason})`).join(', ')})` : '';
             
             emailBody += `${accessory.name} (${accessory.pool}): ${startDate} - ${endDate}${reason}\n`;
         });
@@ -2545,3 +2491,34 @@ function getFutureBookingRanges(filter) {
         }
     });
 }
+
+let tempOutOfService = [];
+function renderOutOfServiceList() {
+    const list = document.getElementById('outOfServiceList');
+    list.innerHTML = tempOutOfService.map((period, index) => `
+        <div class="out-of-service-period">
+            <span>${period.quantity} units: ${period.startDate} - ${period.endDate} (${period.reason})</span>
+            <button onclick="removeOutOfServicePeriod(${index})">Remove</button>
+        </div>
+    `).join('') || '<p>No out of service periods</p>';
+}
+
+function removeOutOfServicePeriod(index) {
+    tempOutOfService.splice(index, 1);
+    renderOutOfServiceList();
+}
+
+function openOutOfServiceModalForEdit() {
+    currentServiceAccessory = currentEditingAccessory; // or null if new
+    serviceSelectedDates = [];
+    const modal = document.getElementById('outOfServiceModal');
+    document.getElementById('serviceAccessoryName').textContent = currentEditingAccessory ? currentEditingAccessory.name : 'New Accessory';
+    document.getElementById('serviceAccessoryPool').textContent = currentEditingAccessory ? currentEditingAccessory.pool : currentPool;
+    document.getElementById('serviceReasonInput').value = '';
+    document.getElementById('serviceQuantity').value = 1;
+    renderServiceCalendar();
+    modal.style.display = 'block';
+    isEditingPeriod = true; // Flag to know we're adding to temp
+}
+
+let isEditingPeriod = false;

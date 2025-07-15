@@ -126,25 +126,9 @@
                     <input type="number" id="requiredPerBooking" min="1" value="1">
                 </div>
                 <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="outOfServiceCheck" onchange="toggleOutOfServiceFields()">
-                        <span class="checkmark"></span>
-                        Out of Service / Maintenance Mode
-                    </label>
-                </div>
-                <div id="serviceFields" class="service-fields" style="display: none;">
-                    <div class="form-group">
-                        <label>Service Start Date</label>
-                        <input type="date" id="serviceStartDate">
-                    </div>
-                    <div class="form-group">
-                        <label>Service End Date</label>
-                        <input type="date" id="serviceEndDate">
-                    </div>
-                    <div class="form-group">
-                        <label>Service Reason</label>
-                        <input type="text" id="serviceReason" placeholder="e.g., Maintenance, Repair, Inspection...">
-                    </div>
+                    <label>Out of Service Periods</label>
+                    <div id="outOfServiceList" class="out-of-service-list"></div>
+                    <button type="button" id="addOutOfServiceBtn" class="btn-add-period">Add Out of Service Period</button>
                 </div>
                 <div class="modal-actions">
                     <button id="saveAccessoryBtn" class="btn-primary">Save Accessory</button>
@@ -180,6 +164,10 @@
                 <div class="form-group">
                     <label>Service Reason</label>
                     <input type="text" id="serviceReasonInput" placeholder="e.g., Maintenance, Repair, Inspection...">
+                </div>
+                <div class="form-group">
+                    <label>Quantity Out of Service</label>
+                    <input type="number" id="serviceQuantity" min="1" value="1">
                 </div>
                 
                 <div class="modal-actions">
