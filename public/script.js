@@ -330,8 +330,6 @@ function openAccessoryForm(accessory = null) {
         tempOutOfService = [];
     }
     renderOutOfServiceList();
-    document.getElementById('outOfServiceCheck').checked = tempOutOfService.length > 0;
-    toggleOutOfServiceFields();
     modal.style.display = 'block';
     // Add event listener for add button
     document.getElementById('addOutOfServiceBtn').addEventListener('click', () => openOutOfServiceModalForEdit());
