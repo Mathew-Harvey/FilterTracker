@@ -100,6 +100,25 @@ async function initDB() {
       ];
       await accessories.insertMany(defaultAccessories);
     }
+
+    // Migrate outOfService to array format
+    const cursor = accessories.find({ "outOfService.isOutOfService": { $exists: true } });
+    for await (const acc of cursor) {
+      const outOfService = acc.outOfService;
+      let newOutOfService = [];
+      if (outOfService.isOutOfService) {
+        newOutOfService = [{
+          quantity: acc.quantity,
+          startDate: outOfService.startDate,
+          endDate: outOfService.endDate,
+          reason: outOfService.reason
+        }];
+      }
+      await accessories.updateOne(
+        { _id: acc._id },
+        { $set: { outOfService: newOutOfService } }
+      );
+    }
   } catch (error) {
     console.error("Database initialization error:", error);
   }

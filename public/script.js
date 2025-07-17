@@ -330,6 +330,8 @@ function openAccessoryForm(accessory = null) {
         tempOutOfService = [];
     }
     renderOutOfServiceList();
+    document.getElementById('outOfServiceCheck').checked = tempOutOfService.length > 0;
+    toggleOutOfServiceFields();
     modal.style.display = 'block';
     // Add event listener for add button
     document.getElementById('addOutOfServiceBtn').addEventListener('click', () => openOutOfServiceModalForEdit());
@@ -549,14 +551,7 @@ function clearOutOfService(accessoryId) {
     if (!accessory) return;
     
     if (confirm(`Return "${accessory.name}" to service?`)) {
-        const outOfService = {
-            isOutOfService: false,
-            startDate: null,
-            endDate: null,
-            reason: ''
-        };
-        
-        updateAccessory(accessoryId, { outOfService });
+        updateAccessory(accessoryId, { outOfService: [] });
     }
 }
 
@@ -564,6 +559,11 @@ function toggleOutOfServiceFields() {
     const isChecked = document.getElementById('outOfServiceCheck').checked;
     const serviceFields = document.getElementById('serviceFields');
     serviceFields.style.display = isChecked ? 'block' : 'none';
+    
+    if (!isChecked) {
+        tempOutOfService = [];
+        renderOutOfServiceList();
+    }
     
     // Set default dates if enabling out of service
     if (isChecked) {
@@ -592,15 +592,6 @@ async function saveAccessory() {
     const isCritical = document.getElementById('isCritical').checked;
     const requiredPerBooking = parseInt(document.getElementById('requiredPerBooking').value) || 1;
     
-    // Get out of service data
-    const isOutOfService = document.getElementById('outOfServiceCheck').checked;
-    const outOfService = {
-        isOutOfService: isOutOfService,
-        startDate: isOutOfService ? document.getElementById('serviceStartDate').value : null,
-        endDate: isOutOfService ? document.getElementById('serviceEndDate').value : null,
-        reason: isOutOfService ? document.getElementById('serviceReason').value.trim() : ''
-    };
-    
     if (!name) {
         alert('Please enter an accessory name');
         return;
@@ -609,18 +600,6 @@ async function saveAccessory() {
     if (quantity < 0) {
         alert('Quantity must be 0 or greater');
         return;
-    }
-    
-    if (isOutOfService) {
-        if (!outOfService.startDate || !outOfService.endDate) {
-            alert('Please enter both start and end dates for out of service period');
-            return;
-        }
-        
-        if (new Date(outOfService.startDate) >= new Date(outOfService.endDate)) {
-            alert('End date must be after start date');
-            return;
-        }
     }
     
     const accessoryData = { name, pool, quantity, unit, notes, outOfService: tempOutOfService, isCritical, requiredPerBooking };
