@@ -1868,7 +1868,7 @@ function generateWeeklyReport(pool) {
         // Filter by pool first
         if (acc.pool !== pool) return false;
         
-        if (!acc.outOfService || !acc.outOfService.isOutOfService) return false;
+        if (!acc.outOfService || acc.outOfService.length === 0) return false;
         
         const serviceStart = new Date(acc.outOfService[0].startDate);
         const serviceEnd = new Date(acc.outOfService[acc.outOfService.length - 1].endDate);
@@ -1885,6 +1885,10 @@ function generateWeeklyReport(pool) {
             const reason = accessory.outOfService.length > 0 ? ` (${accessory.outOfService.map(period => `${period.quantity} units: ${period.startDate} - ${period.endDate} (${period.reason})`).join(', ')})` : '';
             
             emailBody += `${accessory.name} (${accessory.pool}): ${startDate} - ${endDate}${reason}\n`;
+            if (accessory.notes && accessory.notes.trim()) {
+                emailBody += `Notes: ${accessory.notes.trim()}\n`;
+            }
+            emailBody += `\n`;
         });
     } else {
         emailBody += `All accessories operational\n`;
